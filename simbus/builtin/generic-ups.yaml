@@ -1,0 +1,127 @@
+name: "Generic UPS"
+version: "1.0"
+type: ups
+description: >
+  Generic uninterruptible power supply simulator.
+  Models battery state-of-charge, input/output voltage, load percentage,
+  and runtime remaining — common registers on APC, Eaton, and Vertiv UPS units.
+
+modbus:
+  default_port: 5021
+  unit_id: 1
+  endianness: big
+
+registers:
+  holding:
+    - address: 0
+      name: battery_soc
+      description: "Battery state of charge"
+      unit: "%"
+      default: 100.0
+      scale: 10
+      data_type: uint16
+      simulation:
+        behavior: drift
+        rate: -0.005         # slow discharge (~1% per 200 ticks at 1 s/tick)
+        bounds: [0.0, 100.0]
+
+    - address: 1
+      name: input_voltage
+      description: "AC input voltage"
+      unit: "V"
+      default: 120.0
+      scale: 10
+      data_type: uint16
+      simulation:
+        behavior: gaussian_noise
+        std_dev: 0.5
+
+    - address: 2
+      name: output_voltage
+      description: "AC output voltage"
+      unit: "V"
+      default: 120.0
+      scale: 10
+      data_type: uint16
+      simulation:
+        behavior: gaussian_noise
+        std_dev: 0.2
+
+    - address: 3
+      name: load_percent
+      description: "Output load as percentage of capacity"
+      unit: "%"
+      default: 45.0
+      scale: 10
+      data_type: uint16
+      simulation:
+        behavior: sinusoidal
+        period_hours: 2
+        amplitude: 10.0
+
+    - address: 4
+      name: runtime_remaining
+      description: "Estimated runtime remaining on battery"
+      unit: "min"
+      default: 60.0
+      scale: 1
+      data_type: uint16
+      simulation:
+        behavior: drift
+        rate: -0.01
+        bounds: [0.0, 120.0]
+
+    - address: 5
+      name: battery_temp
+      description: "Internal battery temperature"
+      unit: "°C"
+      default: 25.0
+      scale: 10
+      data_type: uint16
+      simulation:
+        behavior: gaussian_noise
+        std_dev: 0.2
+
+  coils:
+    - address: 0
+      name: on_battery
+      description: "UPS is running on battery (utility lost)"
+      default: false
+
+    - address: 1
+      name: low_battery_alarm
+      description: "Battery state of charge critically low"
+      default: false
+      trigger:
+        source_register: battery_soc
+        condition: lt
+        threshold: 20.0
+
+    - address: 2
+      name: overload_alarm
+      description: "Output load exceeds safe threshold"
+      default: false
+      trigger:
+        source_register: load_percent
+        condition: gt
+        threshold: 90.0
+
+    - address: 3
+      name: high_battery_temp_alarm
+      description: "Battery temperature above safe limit"
+      default: false
+      trigger:
+        source_register: battery_temp
+        condition: gt
+        threshold: 40.0
+
+alarms:
+  - name: "Low Battery"
+    severity: critical
+    trigger: low_battery_alarm
+  - name: "Overload"
+    severity: critical
+    trigger: overload_alarm
+  - name: "High Battery Temperature"
+    severity: warning
+    trigger: high_battery_temp_alarm

@@ -1,0 +1,129 @@
+name: "Generic PDU"
+version: "1.0"
+type: pdu
+description: >
+  Generic power distribution unit simulator.
+  Models per-bank current draw, total power, and inlet voltage —
+  typical of Raritan, Vertiv, and APC rack PDUs in data center deployments.
+
+modbus:
+  default_port: 5022
+  unit_id: 1
+  endianness: big
+
+registers:
+  holding:
+    - address: 0
+      name: inlet_voltage
+      description: "Inlet AC voltage"
+      unit: "V"
+      default: 208.0
+      scale: 10
+      data_type: uint16
+      simulation:
+        behavior: gaussian_noise
+        std_dev: 0.5
+
+    - address: 1
+      name: bank_a_current
+      description: "Current draw on bank A"
+      unit: "A"
+      default: 8.0
+      scale: 100
+      data_type: uint16
+      simulation:
+        behavior: gaussian_noise
+        std_dev: 0.2
+        drift:
+          enabled: true
+          rate: 0.002
+          bounds: [0.0, 16.0]
+
+    - address: 2
+      name: bank_b_current
+      description: "Current draw on bank B"
+      unit: "A"
+      default: 6.5
+      scale: 100
+      data_type: uint16
+      simulation:
+        behavior: gaussian_noise
+        std_dev: 0.2
+        drift:
+          enabled: true
+          rate: 0.001
+          bounds: [0.0, 16.0]
+
+    - address: 3
+      name: total_power
+      description: "Total active power consumed"
+      unit: "W"
+      default: 3000.0
+      scale: 1
+      data_type: uint16
+      simulation:
+        behavior: sinusoidal
+        period_hours: 4
+        amplitude: 300.0
+
+    - address: 4
+      name: total_energy
+      description: "Cumulative energy consumption"
+      unit: "kWh"
+      default: 0.0
+      scale: 10
+      data_type: uint16
+      simulation:
+        behavior: drift
+        rate: 0.001
+        bounds: [0.0, 6553.5]
+
+    - address: 5
+      name: pdu_temp
+      description: "PDU internal temperature"
+      unit: "°C"
+      default: 28.0
+      scale: 10
+      data_type: uint16
+      simulation:
+        behavior: gaussian_noise
+        std_dev: 0.3
+
+  coils:
+    - address: 0
+      name: bank_a_overcurrent
+      description: "Bank A current exceeds rated limit"
+      default: false
+      trigger:
+        source_register: bank_a_current
+        condition: gt
+        threshold: 14.0
+
+    - address: 1
+      name: bank_b_overcurrent
+      description: "Bank B current exceeds rated limit"
+      default: false
+      trigger:
+        source_register: bank_b_current
+        condition: gt
+        threshold: 14.0
+
+    - address: 2
+      name: high_pdu_temp
+      description: "PDU temperature above safe threshold"
+      default: false
+      trigger:
+        source_register: pdu_temp
+        condition: gt
+        threshold: 45.0
+
+alarms:
+  - name: "Bank A Overcurrent"
+    severity: critical
+    trigger: bank_a_overcurrent
+  - name: "Bank B Overcurrent"
+    severity: critical
+    trigger: bank_b_overcurrent
+  - name: "High PDU Temperature"
+    severity: warning
+    trigger: high_pdu_temp

@@ -1,0 +1,135 @@
+name: "Generic CRAC"
+version: "1.0"
+type: crac
+description: >
+  Generic computer room air conditioning unit simulator.
+  Models supply/return air temperatures, humidity, compressor state,
+  fan speed, and cooling capacity — typical of Liebert and Stulz CRAC units.
+
+modbus:
+  default_port: 5023
+  unit_id: 1
+  endianness: big
+
+registers:
+  holding:
+    - address: 0
+      name: supply_temp
+      description: "Supply air temperature (cold aisle)"
+      unit: "°C"
+      default: 18.0
+      scale: 10
+      data_type: uint16
+      simulation:
+        behavior: gaussian_noise
+        std_dev: 0.2
+        drift:
+          enabled: true
+          rate: 0.003
+          bounds: [15.0, 25.0]
+
+    - address: 1
+      name: return_temp
+      description: "Return air temperature (hot aisle)"
+      unit: "°C"
+      default: 28.0
+      scale: 10
+      data_type: uint16
+      simulation:
+        behavior: sinusoidal
+        period_hours: 1
+        amplitude: 2.0
+
+    - address: 2
+      name: supply_humidity
+      description: "Supply air relative humidity"
+      unit: "%RH"
+      default: 50.0
+      scale: 10
+      data_type: uint16
+      simulation:
+        behavior: sinusoidal
+        period_hours: 6
+        amplitude: 5.0
+
+    - address: 3
+      name: fan_speed
+      description: "Fan speed as percentage of maximum"
+      unit: "%"
+      default: 70.0
+      scale: 10
+      data_type: uint16
+      simulation:
+        behavior: gaussian_noise
+        std_dev: 1.0
+
+    - address: 4
+      name: cooling_capacity
+      description: "Active cooling capacity"
+      unit: "kW"
+      default: 15.0
+      scale: 100
+      data_type: uint16
+      simulation:
+        behavior: gaussian_noise
+        std_dev: 0.3
+
+    - address: 5
+      name: setpoint
+      description: "Supply air temperature setpoint"
+      unit: "°C"
+      default: 18.0
+      scale: 10
+      data_type: uint16
+      simulation:
+        behavior: constant
+
+  coils:
+    - address: 0
+      name: compressor_on
+      description: "Compressor is active"
+      default: true
+
+    - address: 1
+      name: high_return_temp
+      description: "Return air temperature is critically high"
+      default: false
+      trigger:
+        source_register: return_temp
+        condition: gt
+        threshold: 35.0
+
+    - address: 2
+      name: low_supply_temp
+      description: "Supply air temperature below safe minimum"
+      default: false
+      trigger:
+        source_register: supply_temp
+        condition: lt
+        threshold: 12.0
+
+    - address: 3
+      name: high_humidity
+      description: "Supply humidity exceeds safe upper bound"
+      default: false
+      trigger:
+        source_register: supply_humidity
+        condition: gt
+        threshold: 70.0
+
+  discrete:
+    - address: 0
+      name: unit_on
+      description: "CRAC unit is powered and operational"
+      default: true
+
+alarms:
+  - name: "High Return Temperature"
+    severity: critical
+    trigger: high_return_temp
+  - name: "Low Supply Temperature"
+    severity: warning
+    trigger: low_supply_temp
+  - name: "High Humidity"
+    severity: warning
+    trigger: high_humidity

@@ -1,0 +1,98 @@
+name: "Generic Door Contact"
+version: "1.0"
+type: door_contact
+description: >
+  Generic door/access contact sensor simulator.
+  Models magnetic contact state, door-open duration, forced-entry detection,
+  and tamper sensing — representative of server room and cage door monitoring
+  in physical security and BMS integrations.
+
+modbus:
+  default_port: 5026
+  unit_id: 1
+  endianness: big
+
+registers:
+  holding:
+    - address: 0
+      name: door_open_duration
+      description: "Seconds the door has been continuously open (0 = closed)"
+      unit: "s"
+      default: 0.0
+      scale: 1
+      data_type: uint16
+      simulation:
+        behavior: sawtooth
+        period_seconds: 3600.0
+        min: 0.0
+        max: 300.0
+
+    - address: 1
+      name: open_count
+      description: "Total number of door open events since last reset"
+      unit: ""
+      default: 0.0
+      scale: 1
+      data_type: uint16
+      simulation:
+        behavior: drift
+        rate: 0.001
+        bounds: [0.0, 65535.0]
+
+    - address: 2
+      name: ambient_temp
+      description: "Ambient temperature at door sensor location"
+      unit: "°C"
+      default: 21.0
+      scale: 10
+      data_type: uint16
+      simulation:
+        behavior: gaussian_noise
+        std_dev: 0.3
+
+  coils:
+    - address: 0
+      name: door_open
+      description: "Door is currently open"
+      default: false
+
+    - address: 1
+      name: door_held_open
+      description: "Door held open beyond allowed duration"
+      default: false
+      trigger:
+        source_register: door_open_duration
+        condition: gt
+        threshold: 120.0
+
+    - address: 2
+      name: forced_entry
+      description: "Door opened without valid access credential"
+      default: false
+
+    - address: 3
+      name: tamper
+      description: "Sensor tamper or enclosure intrusion detected"
+      default: false
+
+  discrete:
+    - address: 0
+      name: power_ok
+      description: "Sensor has valid power supply"
+      default: true
+
+    - address: 1
+      name: comms_ok
+      description: "Communication link to access controller is healthy"
+      default: true
+
+alarms:
+  - name: "Door Held Open"
+    severity: warning
+    trigger: door_held_open
+  - name: "Forced Entry"
+    severity: critical
+    trigger: forced_entry
+  - name: "Sensor Tamper"
+    severity: critical
+    trigger: tamper

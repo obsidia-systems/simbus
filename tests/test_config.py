@@ -204,3 +204,47 @@ class TestLoader:
     def test_load_builtin_unknown_raises(self) -> None:
         with pytest.raises(ValueError, match="Unknown built-in"):
             load_builtin("nonexistent-device")
+
+    def test_load_builtin_ups(self) -> None:
+        cfg = load_builtin("generic-ups")
+        assert cfg.type == "ups"
+        assert len(cfg.registers.holding) == 6
+        assert cfg.registers.holding[0].name == "battery_soc"
+        assert len(cfg.alarms) == 3
+
+    def test_load_builtin_pdu(self) -> None:
+        cfg = load_builtin("generic-pdu")
+        assert cfg.type == "pdu"
+        assert len(cfg.registers.holding) == 6
+        assert cfg.registers.holding[0].name == "inlet_voltage"
+        assert len(cfg.alarms) == 3
+
+    def test_load_builtin_crac(self) -> None:
+        cfg = load_builtin("generic-crac")
+        assert cfg.type == "crac"
+        assert len(cfg.registers.holding) == 6
+        assert cfg.registers.holding[0].name == "supply_temp"
+        assert len(cfg.registers.discrete) == 1
+        assert len(cfg.alarms) == 3
+
+    def test_load_builtin_power_meter(self) -> None:
+        cfg = load_builtin("generic-power-meter")
+        assert cfg.type == "power_meter"
+        assert len(cfg.registers.holding) == 12
+        assert cfg.registers.holding[6].name == "real_power"
+        assert len(cfg.alarms) == 3
+
+    def test_load_builtin_leak_sensor(self) -> None:
+        cfg = load_builtin("generic-leak-sensor")
+        assert cfg.type == "leak_sensor"
+        assert len(cfg.registers.holding) == 4
+        assert cfg.registers.holding[0].name == "zone1_resistance"
+        assert len(cfg.alarms) == 3
+
+    def test_load_builtin_door_contact(self) -> None:
+        cfg = load_builtin("generic-door-contact")
+        assert cfg.type == "door_contact"
+        assert len(cfg.registers.holding) == 3
+        assert len(cfg.registers.coils) == 4
+        assert len(cfg.registers.discrete) == 2
+        assert len(cfg.alarms) == 3

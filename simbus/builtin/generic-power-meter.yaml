@@ -1,0 +1,190 @@
+name: "Generic Power Meter"
+version: "1.0"
+type: power_meter
+description: >
+  Generic three-phase power meter simulator.
+  Models per-phase voltage and current, real/reactive/apparent power,
+  power factor, and cumulative energy — common on Schneider PM/ION series
+  and similar submetering equipment in data centers.
+
+modbus:
+  default_port: 5024
+  unit_id: 1
+  endianness: big
+
+registers:
+  holding:
+    - address: 0
+      name: voltage_l1
+      description: "Line 1 voltage (L1-N)"
+      unit: "V"
+      default: 120.0
+      scale: 10
+      data_type: uint16
+      simulation:
+        behavior: gaussian_noise
+        std_dev: 0.3
+
+    - address: 1
+      name: voltage_l2
+      description: "Line 2 voltage (L2-N)"
+      unit: "V"
+      default: 120.0
+      scale: 10
+      data_type: uint16
+      simulation:
+        behavior: gaussian_noise
+        std_dev: 0.3
+
+    - address: 2
+      name: voltage_l3
+      description: "Line 3 voltage (L3-N)"
+      unit: "V"
+      default: 120.0
+      scale: 10
+      data_type: uint16
+      simulation:
+        behavior: gaussian_noise
+        std_dev: 0.3
+
+    - address: 3
+      name: current_l1
+      description: "Line 1 current"
+      unit: "A"
+      default: 20.0
+      scale: 100
+      data_type: uint16
+      simulation:
+        behavior: sinusoidal
+        period_hours: 2
+        amplitude: 5.0
+
+    - address: 4
+      name: current_l2
+      description: "Line 2 current"
+      unit: "A"
+      default: 18.0
+      scale: 100
+      data_type: uint16
+      simulation:
+        behavior: sinusoidal
+        period_hours: 2
+        amplitude: 4.0
+
+    - address: 5
+      name: current_l3
+      description: "Line 3 current"
+      unit: "A"
+      default: 21.0
+      scale: 100
+      data_type: uint16
+      simulation:
+        behavior: sinusoidal
+        period_hours: 2
+        amplitude: 5.0
+
+    - address: 6
+      name: real_power
+      description: "Total three-phase real (active) power"
+      unit: "kW"
+      default: 7.0
+      scale: 100
+      data_type: uint16
+      simulation:
+        behavior: gaussian_noise
+        std_dev: 0.1
+
+    - address: 7
+      name: reactive_power
+      description: "Total three-phase reactive power"
+      unit: "kVAR"
+      default: 1.5
+      scale: 100
+      data_type: uint16
+      simulation:
+        behavior: gaussian_noise
+        std_dev: 0.05
+
+    - address: 8
+      name: apparent_power
+      description: "Total three-phase apparent power"
+      unit: "kVA"
+      default: 7.2
+      scale: 100
+      data_type: uint16
+      simulation:
+        behavior: gaussian_noise
+        std_dev: 0.1
+
+    - address: 9
+      name: power_factor
+      description: "Average power factor (0–100 represents 0.00–1.00)"
+      unit: ""
+      default: 97.0
+      scale: 1
+      data_type: uint16
+      simulation:
+        behavior: gaussian_noise
+        std_dev: 0.5
+
+    - address: 10
+      name: frequency
+      description: "Line frequency"
+      unit: "Hz"
+      default: 60.0
+      scale: 100
+      data_type: uint16
+      simulation:
+        behavior: gaussian_noise
+        std_dev: 0.02
+
+    - address: 11
+      name: energy_kwh
+      description: "Cumulative active energy consumption"
+      unit: "kWh"
+      default: 0.0
+      scale: 10
+      data_type: uint16
+      simulation:
+        behavior: drift
+        rate: 0.002
+        bounds: [0.0, 6553.5]
+
+  coils:
+    - address: 0
+      name: undervoltage_l1
+      description: "Line 1 voltage below minimum threshold"
+      default: false
+      trigger:
+        source_register: voltage_l1
+        condition: lt
+        threshold: 108.0
+
+    - address: 1
+      name: overvoltage_l1
+      description: "Line 1 voltage above maximum threshold"
+      default: false
+      trigger:
+        source_register: voltage_l1
+        condition: gt
+        threshold: 132.0
+
+    - address: 2
+      name: low_power_factor
+      description: "Power factor below acceptable limit"
+      default: false
+      trigger:
+        source_register: power_factor
+        condition: lt
+        threshold: 85.0
+
+alarms:
+  - name: "Undervoltage L1"
+    severity: warning
+    trigger: undervoltage_l1
+  - name: "Overvoltage L1"
+    severity: warning
+    trigger: overvoltage_l1
+  - name: "Low Power Factor"
+    severity: info
+    trigger: low_power_factor

@@ -1,0 +1,105 @@
+name: "Generic Leak Sensor"
+version: "1.0"
+type: leak_sensor
+description: >
+  Generic water/fluid leak detection sensor simulator.
+  Models a zone-based leak detector with resistance measurements —
+  typical of Perma-Pipe, TTK, or Aqualeak sensing rope systems
+  used under raised floors and around CRAC units.
+
+modbus:
+  default_port: 5025
+  unit_id: 1
+  endianness: big
+
+registers:
+  holding:
+    - address: 0
+      name: zone1_resistance
+      description: "Sensing rope resistance zone 1 (high = dry, low = wet)"
+      unit: "Ω"
+      default: 5000.0
+      scale: 1
+      data_type: uint16
+      simulation:
+        behavior: gaussian_noise
+        std_dev: 10.0
+
+    - address: 1
+      name: zone2_resistance
+      description: "Sensing rope resistance zone 2"
+      unit: "Ω"
+      default: 5000.0
+      scale: 1
+      data_type: uint16
+      simulation:
+        behavior: gaussian_noise
+        std_dev: 10.0
+
+    - address: 2
+      name: ambient_temp
+      description: "Ambient temperature at sensor location"
+      unit: "°C"
+      default: 20.0
+      scale: 10
+      data_type: uint16
+      simulation:
+        behavior: gaussian_noise
+        std_dev: 0.3
+
+    - address: 3
+      name: ambient_humidity
+      description: "Ambient relative humidity at sensor location"
+      unit: "%RH"
+      default: 50.0
+      scale: 10
+      data_type: uint16
+      simulation:
+        behavior: sinusoidal
+        period_hours: 8
+        amplitude: 5.0
+
+  coils:
+    - address: 0
+      name: zone1_leak_detected
+      description: "Leak detected on zone 1 sensing rope"
+      default: false
+      trigger:
+        source_register: zone1_resistance
+        condition: lt
+        threshold: 500.0
+
+    - address: 1
+      name: zone2_leak_detected
+      description: "Leak detected on zone 2 sensing rope"
+      default: false
+      trigger:
+        source_register: zone2_resistance
+        condition: lt
+        threshold: 500.0
+
+    - address: 2
+      name: high_humidity_warning
+      description: "Ambient humidity elevated — potential condensation risk"
+      default: false
+      trigger:
+        source_register: ambient_humidity
+        condition: gt
+        threshold: 75.0
+
+  discrete:
+    - address: 0
+      name: sensor_ok
+      description: "Sensor self-test passed and cable integrity confirmed"
+      default: true
+
+alarms:
+  - name: "Zone 1 Leak"
+    severity: critical
+    trigger: zone1_leak_detected
+  - name: "Zone 2 Leak"
+    severity: critical
+    trigger: zone2_leak_detected
+  - name: "High Humidity"
+    severity: warning
+    trigger: high_humidity_warning
