@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import math
 from random import Random
 
 import pytest
@@ -125,11 +124,13 @@ class TestStepValue:
         assert step_value(22.5, steps, 15.0) == pytest.approx(50.0)
 
     def test_last_step_wins(self) -> None:
-        steps = [StepEntry(at=10.0, value=50.0), StepEntry(at=20.0, value=75.0)]
+        steps = [StepEntry(at=10.0, value=50.0),
+                 StepEntry(at=20.0, value=75.0)]
         assert step_value(0.0, steps, 25.0) == pytest.approx(75.0)
 
     def test_step_ordering_independent_of_definition_order(self) -> None:
-        steps = [StepEntry(at=20.0, value=75.0), StepEntry(at=10.0, value=50.0)]
+        steps = [StepEntry(at=20.0, value=75.0),
+                 StepEntry(at=10.0, value=50.0)]
         assert step_value(0.0, steps, 15.0) == pytest.approx(50.0)
 
     def test_empty_steps_returns_default(self) -> None:
@@ -148,7 +149,8 @@ class TestScaling:
 
     def test_round_trip(self) -> None:
         original = 22.5
-        assert raw_to_scaled(scale_to_raw(original, 10), 10) == pytest.approx(original)
+        assert raw_to_scaled(scale_to_raw(original, 10),
+                             10) == pytest.approx(original)
 
     def test_scale_to_raw_clamps_uint16(self) -> None:
         result = scale_to_raw(700.0, 100)

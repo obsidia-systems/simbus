@@ -13,7 +13,6 @@ from simbus.config.schema import (
     SinusoidalBehavior,
 )
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -80,7 +79,8 @@ class TestDeviceConfig:
         with pytest.raises(ValidationError, match="unknown coil"):
             DeviceConfig.model_validate(
                 _minimal_device(
-                    alarms=[{"name": "Bad Alarm", "severity": "warning", "trigger": "ghost_coil"}]
+                    alarms=[{"name": "Bad Alarm",
+                             "severity": "warning", "trigger": "ghost_coil"}]
                 )
             )
 
@@ -89,7 +89,8 @@ class TestDeviceConfig:
             _minimal_device(
                 registers={
                     "holding": [
-                        {"address": 0, "name": "temperature", "default": 22.5, "scale": 10}
+                        {"address": 0, "name": "temperature",
+                            "default": 22.5, "scale": 10}
                     ],
                     "coils": [
                         {
