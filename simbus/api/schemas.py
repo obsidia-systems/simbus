@@ -22,6 +22,47 @@ class StatusResponse(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# Config
+# ---------------------------------------------------------------------------
+
+
+class RegisterInfoResponse(BaseModel):
+    address: int
+    name: str
+    description: str
+    unit: str
+    scale: int
+    data_type: str
+    default: float
+    behavior: str | None = None
+
+
+class CoilInfoResponse(BaseModel):
+    address: int
+    name: str
+    description: str
+    default: bool
+
+
+class RegisterMapResponse(BaseModel):
+    holding: list[RegisterInfoResponse]
+    input: list[RegisterInfoResponse]
+    coils: list[CoilInfoResponse]
+    discrete: list[CoilInfoResponse]
+
+
+class ConfigResponse(BaseModel):
+    name: str
+    version: str
+    type: str
+    description: str
+    modbus_port: int
+    unit_id: int
+    endianness: str
+    registers: RegisterMapResponse
+
+
+# ---------------------------------------------------------------------------
 # Registers
 # ---------------------------------------------------------------------------
 

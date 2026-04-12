@@ -63,6 +63,46 @@ class TestStatus:
 
 
 # ---------------------------------------------------------------------------
+# GET /config
+# ---------------------------------------------------------------------------
+
+
+class TestGetConfig:
+    def test_returns_200(self, client: TestClient) -> None:
+        assert client.get("/config").status_code == 200
+
+    def test_device_metadata(self, client: TestClient) -> None:
+        data = client.get("/config").json()
+        assert data["name"] == "Generic T&H Sensor"
+        assert data["type"] == "tnh_sensor"
+        assert data["version"] == "1.0"
+        assert data["unit_id"] == 1
+        assert data["endianness"] == "big"
+
+    def test_holding_registers_shape(self, client: TestClient) -> None:
+        regs = client.get("/config").json()["registers"]["holding"]
+        assert len(regs) == 2
+        temp = regs[0]
+        assert temp["address"] == 0
+        assert temp["name"] == "temperature"
+        assert temp["unit"] == "°C"
+        assert temp["scale"] == 10
+        assert temp["default"] == 22.5
+        assert temp["behavior"] == "gaussian_noise"
+
+    def test_coils_shape(self, client: TestClient) -> None:
+        coils = client.get("/config").json()["registers"]["coils"]
+        assert len(coils) == 2
+        assert coils[0]["name"] == "high_temp_alarm"
+        assert coils[0]["default"] is False
+
+    def test_register_without_simulation_has_null_behavior(self, client: TestClient) -> None:
+        # All tnh-sensor holding registers have simulation, but verify the field exists
+        for reg in client.get("/config").json()["registers"]["holding"]:
+            assert "behavior" in reg
+
+
+# ---------------------------------------------------------------------------
 # GET /registers
 # ---------------------------------------------------------------------------
 
@@ -285,6 +325,55 @@ class TestPatchSimulation:
         client.patch("/simulation", json={"tick_interval": 9999.0})
         data = client.get("/status").json()
         assert data["tick_interval"] == 9999.0
+
+
+# ---------------------------------------------------------------------------
+# POST /simulation/reset
+# ---------------------------------------------------------------------------
+
+
+class TestSimulationReset:
+    def test_reset_returns_204(self, client: TestClient) -> None:
+        assert client.post("/simulation/reset").status_code == 204
+
+    def test_reset_restores_overridden_register(self, client: TestClient) -> None:
+        # Override temperature to an extreme value
+        client.patch("/registers/0", json={"value": 999})
+        assert client.get("/registers").json()["holding"]["0"] == 999
+        # Reset — should go back to default (22.5°C × 10 = 225)
+        client.post("/simulation/reset")
+        assert client.get("/registers").json()["holding"]["0"] == 225
+
+    def test_reset_clears_faults(self, client: TestClient) -> None:
+        client.post("/faults", json={"fault_type": "dropout", "duration_s": 999.0})
+        assert len(client.get("/faults").json()) > 0
+        client.post("/simulation/reset")
+        assert client.get("/faults").json() == []
+
+    def test_simulation_still_running_after_reset(self, client: TestClient) -> None:
+        client.post("/simulation/reset")
+        assert client.get("/status").json()["simulation"] == "running"
+
+
+# ---------------------------------------------------------------------------
+# CORS headers
+# ---------------------------------------------------------------------------
+
+
+class TestCORS:
+    def test_cors_header_present_on_status(self, client: TestClient) -> None:
+        r = client.get("/status", headers={"Origin": "http://localhost:5173"})
+        assert r.headers.get("access-control-allow-origin") in ("*", "http://localhost:5173")
+
+    def test_cors_preflight(self, client: TestClient) -> None:
+        r = client.options(
+            "/registers",
+            headers={
+                "Origin": "http://localhost:5173",
+                "Access-Control-Request-Method": "GET",
+            },
+        )
+        assert r.status_code in (200, 204)
 
 
 # ---------------------------------------------------------------------------

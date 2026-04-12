@@ -99,6 +99,17 @@ class SimulationEngine:
         """Clear all active faults immediately."""
         self._faults.clear()
 
+    def reset(self) -> None:
+        """Reset all registers to YAML defaults and clear all faults.
+
+        The simulation continues running — only values and state are rewound.
+        """
+        self._store.initialize(self._config.registers)
+        self._faults.clear()
+        for reg in self._config.registers.holding + self._config.registers.input:
+            self._state[reg.address].base = reg.default
+            self._state[reg.address].elapsed_s = 0.0
+
     def update_base(self, address: int, raw_value: int) -> None:
         """Update simulation base for a holding register from a raw store value.
 

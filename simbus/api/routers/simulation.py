@@ -75,3 +75,12 @@ async def patch_simulation(body: SimulationPatchRequest, request: Request) -> di
     if body.tick_interval is not None:
         engine.tick_interval = body.tick_interval
     return {"tick_interval": engine.tick_interval}
+
+
+@router.post(
+    "/simulation/reset",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Reset all registers to YAML defaults and clear faults",
+)
+async def reset_simulation(request: Request) -> None:
+    request.app.state.engine.reset()

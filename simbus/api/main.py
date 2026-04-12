@@ -20,6 +20,7 @@ from typing import AsyncGenerator
 
 import structlog
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 
 from simbus.config.loader import load_builtin, load_from_file
 from simbus.core.modbus_server import ModbusServerInstance
@@ -115,6 +116,14 @@ def create_app(settings: DeviceSettings | None = None) -> FastAPI:
 
     if settings is not None:
         _app.state.settings = settings
+
+    cors_origins = settings.cors_origins if settings is not None else ["*"]
+    _app.add_middleware(
+        CORSMiddleware,
+        allow_origins=cors_origins,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
 
     _app.include_router(status.router, tags=["status"])
     _app.include_router(registers.router, prefix="/registers", tags=["registers"])

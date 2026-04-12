@@ -48,3 +48,9 @@ class DeviceSettings(BaseSettings):
 
     # Optional name override (takes precedence over the YAML name field)
     device_name: str | None = Field(default=None)
+
+    # CORS — set to specific origins in production, e.g. "http://localhost:5173,https://my-gui.com"
+    cors_origins: list[str] = Field(
+        default=["*"],
+        description="Allowed CORS origins. Use ['*'] for development.",
+    )
