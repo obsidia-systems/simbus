@@ -55,6 +55,11 @@ async def override_register(
     body: RegisterOverrideRequest,
     request: Request,
 ) -> dict[str, int]:
+    """Write a raw value to a holding register and update the simulation base.
+
+    The simulation continues from the new value — behaviors like gaussian_noise
+    and sinusoidal will oscillate around the new base instead of snapping back.
+    """
     store = request.app.state.store
     if address not in store.holding_raw:
         raise HTTPException(

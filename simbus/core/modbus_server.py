@@ -150,6 +150,12 @@ class ModbusServerInstance:
     """
 
     def __init__(self, store: RegisterStore, port: int, unit_id: int) -> None:
+        """
+        Args:
+            store: RegisterStore whose values are served over Modbus TCP.
+            port: TCP port to listen on.
+            unit_id: Modbus unit ID (1–247).
+        """
         self._store = store
         self._port = port
         self._unit_id = unit_id

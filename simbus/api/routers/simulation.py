@@ -26,6 +26,7 @@ router = APIRouter()
     summary="Inject a fault into the running simulation",
 )
 async def inject_fault(body: FaultRequest, request: Request) -> dict[str, str]:
+    """Inject a fault. Expires automatically after `duration_s` seconds."""
     engine = request.app.state.engine
     fault = ActiveFault(
         fault_type=FaultType(body.fault_type),
@@ -44,6 +45,7 @@ async def inject_fault(body: FaultRequest, request: Request) -> dict[str, str]:
     summary="List active faults",
 )
 async def list_faults(request: Request) -> list[ActiveFaultResponse]:
+    """Return all currently active faults with their remaining duration."""
     engine = request.app.state.engine
     return [
         ActiveFaultResponse(
@@ -71,6 +73,7 @@ async def clear_faults(request: Request) -> None:
     summary="Update simulation parameters",
 )
 async def patch_simulation(body: SimulationPatchRequest, request: Request) -> dict[str, object]:
+    """Update simulation parameters. Changes take effect on the next tick without restarting."""
     engine = request.app.state.engine
     if body.tick_interval is not None:
         engine.tick_interval = body.tick_interval
@@ -83,4 +86,5 @@ async def patch_simulation(body: SimulationPatchRequest, request: Request) -> di
     summary="Reset all registers to YAML defaults and clear faults",
 )
 async def reset_simulation(request: Request) -> None:
+    """Reset all registers to YAML defaults, clear faults, and rewind simulation time. Engine keeps running."""
     request.app.state.engine.reset()

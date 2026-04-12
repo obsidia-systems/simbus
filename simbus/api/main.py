@@ -7,7 +7,7 @@ At startup the lifespan:
   2. Loads the DeviceConfig from a built-in type or YAML file.
   3. Initializes RegisterStore with default values.
   4. Starts SimulationEngine as an asyncio Task.
-  5. (Phase 2) Starts ModbusServerInstance as an asyncio Task.
+  5. Starts ModbusServerInstance as an asyncio Task.
 
 All routers access device state via request.app.state.
 """

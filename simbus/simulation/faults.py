@@ -2,8 +2,7 @@
 
 Faults are short-lived overrides applied by the SimulationEngine on each tick.
 They expire automatically when their `remaining_s` reaches zero.
-
-Phase 3 will add the full fault API surface (REST endpoints, CLI commands).
+The fault API is exposed via REST endpoints in the simulation router.
 """
 
 from __future__ import annotations
