@@ -1,0 +1,35 @@
+# Version control
+.git
+.gitignore
+
+# Python caches
+__pycache__/
+*.py[cod]
+*.pyo
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+
+# Virtual environment
+.venv/
+
+# Test artifacts
+tests/
+.coverage
+htmlcov/
+
+# Dev tooling
+.env
+*.env.*
+!.env.example
+
+# Editor / OS
+.vscode/
+.idea/
+*.swp
+.DS_Store
+
+# Docs and examples
+docs/
+devices/
+example.py

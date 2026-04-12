@@ -1,0 +1,132 @@
+# simbus — Industrial Field Device Simulator
+#
+# Runs a full lab of 7 virtual Modbus TCP devices, each in its own container.
+# Every container exposes:
+#   - A Modbus TCP server  (port 50xx on the host)
+#   - A REST control API   (port 80xx on the host)
+#
+# Usage:
+#   docker compose up                        # all devices
+#   docker compose up tnh-sensor crac        # specific devices
+#   docker compose up --profile power        # power-related group
+#
+# Port map:
+#   tnh-sensor    Modbus 5020  API 8000
+#   ups           Modbus 5021  API 8001
+#   pdu           Modbus 5022  API 8002
+#   crac          Modbus 5023  API 8003
+#   power-meter   Modbus 5024  API 8004
+#   leak-sensor   Modbus 5025  API 8005
+#   door-contact  Modbus 5026  API 8006
+
+x-simbus-defaults: &simbus-defaults
+  build:
+    context: .
+    dockerfile: Dockerfile
+    target: runtime
+  restart: unless-stopped
+  networks:
+    - simbus
+
+services:
+
+  # ── Environmental sensors ──────────────────────────────────────────────────
+
+  tnh-sensor:
+    <<: *simbus-defaults
+    container_name: simbus-tnh-sensor
+    environment:
+      SIMBUS_DEVICE_TYPE: generic-tnh-sensor
+      SIMBUS_MODBUS_PORT: "5020"
+      SIMBUS_API_PORT: "8000"
+      SIMBUS_TICK_INTERVAL: "1.0"
+    ports:
+      - "5020:5020"   # Modbus TCP
+      - "8000:8000"   # REST API
+    profiles: ["env", "all"]
+
+  leak-sensor:
+    <<: *simbus-defaults
+    container_name: simbus-leak-sensor
+    environment:
+      SIMBUS_DEVICE_TYPE: generic-leak-sensor
+      SIMBUS_MODBUS_PORT: "5025"
+      SIMBUS_API_PORT: "8005"
+      SIMBUS_TICK_INTERVAL: "1.0"
+    ports:
+      - "5025:5025"
+      - "8005:8005"
+    profiles: ["env", "all"]
+
+  door-contact:
+    <<: *simbus-defaults
+    container_name: simbus-door-contact
+    environment:
+      SIMBUS_DEVICE_TYPE: generic-door-contact
+      SIMBUS_MODBUS_PORT: "5026"
+      SIMBUS_API_PORT: "8006"
+      SIMBUS_TICK_INTERVAL: "1.0"
+    ports:
+      - "5026:5026"
+      - "8006:8006"
+    profiles: ["env", "all"]
+
+  # ── Cooling ────────────────────────────────────────────────────────────────
+
+  crac:
+    <<: *simbus-defaults
+    container_name: simbus-crac
+    environment:
+      SIMBUS_DEVICE_TYPE: generic-crac
+      SIMBUS_MODBUS_PORT: "5023"
+      SIMBUS_API_PORT: "8003"
+      SIMBUS_TICK_INTERVAL: "1.0"
+    ports:
+      - "5023:5023"
+      - "8003:8003"
+    profiles: ["cooling", "all"]
+
+  # ── Power ──────────────────────────────────────────────────────────────────
+
+  ups:
+    <<: *simbus-defaults
+    container_name: simbus-ups
+    environment:
+      SIMBUS_DEVICE_TYPE: generic-ups
+      SIMBUS_MODBUS_PORT: "5021"
+      SIMBUS_API_PORT: "8001"
+      SIMBUS_TICK_INTERVAL: "1.0"
+    ports:
+      - "5021:5021"
+      - "8001:8001"
+    profiles: ["power", "all"]
+
+  pdu:
+    <<: *simbus-defaults
+    container_name: simbus-pdu
+    environment:
+      SIMBUS_DEVICE_TYPE: generic-pdu
+      SIMBUS_MODBUS_PORT: "5022"
+      SIMBUS_API_PORT: "8002"
+      SIMBUS_TICK_INTERVAL: "1.0"
+    ports:
+      - "5022:5022"
+      - "8002:8002"
+    profiles: ["power", "all"]
+
+  power-meter:
+    <<: *simbus-defaults
+    container_name: simbus-power-meter
+    environment:
+      SIMBUS_DEVICE_TYPE: generic-power-meter
+      SIMBUS_MODBUS_PORT: "5024"
+      SIMBUS_API_PORT: "8004"
+      SIMBUS_TICK_INTERVAL: "1.0"
+    ports:
+      - "5024:5024"
+      - "8004:8004"
+    profiles: ["power", "all"]
+
+networks:
+  simbus:
+    driver: bridge
