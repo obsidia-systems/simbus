@@ -293,6 +293,37 @@ class TestFaultInjection:
 # ---------------------------------------------------------------------------
 
 
+class TestUpdateBase:
+    def test_base_updated_to_new_real_value(self) -> None:
+        engine, store = _make_engine()
+        # temperature: scale=10, PATCH raw=270 → base should become 27.0
+        engine.update_base(0, 270)
+        assert engine._state[0].base == pytest.approx(27.0)
+
+    def test_simulation_continues_from_new_base(self) -> None:
+        cfg = _minimal_config({
+            "holding": [{"address": 0, "name": "temp", "default": 22.5, "scale": 10,
+                         "simulation": {"behavior": "gaussian_noise", "std_dev": 0.1}}]
+        })
+        store = RegisterStore()
+        store.initialize(cfg.registers)
+        engine = SimulationEngine(store=store, config=cfg, seed=0)
+
+        engine.update_base(0, 270)   # new operating point: 27.0°C
+        store.set_holding(0, 270)
+
+        # Run several ticks — values should oscillate around 270 (27.0°C), not 225
+        for _ in range(10):
+            engine._tick(1.0)
+        value = store.get_holding(0)
+        # Should be near 270 (±20 raw units = ±2.0°C), definitely not back at 225
+        assert abs(value - 270) < 20
+
+    def test_unknown_address_is_noop(self) -> None:
+        engine, _ = _make_engine()
+        engine.update_base(999, 500)  # address doesn't exist — must not raise
+
+
 class TestLiveTickInterval:
     def test_tick_interval_mutable(self) -> None:
         engine, _ = _make_engine(tick_interval=1.0)

@@ -99,6 +99,19 @@ class SimulationEngine:
         """Clear all active faults immediately."""
         self._faults.clear()
 
+    def update_base(self, address: int, raw_value: int) -> None:
+        """Update simulation base for a holding register from a raw store value.
+
+        Converts raw → real using the register's scale so the simulation
+        continues from the new operating point on the next tick.
+        Example: raw=270, scale=10 → base=27.0 → noise oscillates around 27.0°C.
+        """
+        reg = next(
+            (r for r in self._config.registers.holding if r.address == address), None
+        )
+        if reg is not None and address in self._state:
+            self._state[address].base = raw_value / reg.scale
+
     def tick_faults(self, dt: float) -> None:
         """Decrement fault timers; remove expired faults."""
         for f in self._faults.values():

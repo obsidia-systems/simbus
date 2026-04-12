@@ -1,17 +1,20 @@
 """Register read/write + SSE streaming endpoints.
 
 GET    /registers           → snapshot of all register values
-PATCH  /registers/{addr}    → manual override of a holding register
+PATCH  /registers/{addr}    → set a new operating point for a holding register
 GET    /registers/stream    → SSE live register updates (text/event-stream)
+
+PATCH behavior:
+  Writes the raw value to the store AND updates the simulation base so that
+  noise/drift continues from the new value instead of snapping back.
+  Example: temperature default=22.5°C, PATCH value=270 (27.0°C) →
+  gaussian_noise now oscillates around 27.0°C on subsequent ticks.
 
 SSE design:
   Each connection creates an asyncio.Queue and appends it to
   engine.sse_queues. The SimulationEngine pushes a JSON snapshot on
   every tick. The generator yields SSE frames until the client disconnects,
   then removes the queue from the list.
-
-Phase 2 note: PATCH will also write through to the pymodbus DataBlock
-once ModbusServerInstance is wired in.
 """
 
 from __future__ import annotations
@@ -59,6 +62,7 @@ async def override_register(
             detail=f"Holding register {address} not found on this device",
         )
     store.set_holding(address, body.value)
+    request.app.state.engine.update_base(address, body.value)
     return {"address": address, "value": body.value}
 
 
