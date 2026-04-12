@@ -95,7 +95,20 @@ class TestTickHolding:
         store.initialize(cfg.registers)
         engine = SimulationEngine(store=store, config=cfg, seed=0)
         engine._tick(1.0)
-        assert store.get_holding(0) == 180  # 18.0 × 10
+        assert store.get_holding(0) == 180  # 18.0 × 10 (state.base initialized from default)
+
+    def test_constant_behavior_follows_patch(self) -> None:
+        cfg = _minimal_config({
+            "holding": [{"address": 0, "name": "setpoint", "default": 18.0, "scale": 10,
+                         "simulation": {"behavior": "constant"}}]
+        })
+        store = RegisterStore()
+        store.initialize(cfg.registers)
+        engine = SimulationEngine(store=store, config=cfg, seed=0)
+        store.set_holding(0, 200)
+        engine.update_base(0, 200)   # 200 raw / scale 10 = 20.0°C
+        engine._tick(1.0)
+        assert store.get_holding(0) == 200  # stays at 20.0°C
 
     def test_gaussian_noise_updates_register(self) -> None:
         engine, store = _make_engine(tick_interval=1.0)
@@ -318,6 +331,28 @@ class TestUpdateBase:
         value = store.get_holding(0)
         # Should be near 270 (±20 raw units = ±2.0°C), definitely not back at 225
         assert abs(value - 270) < 20
+
+    def test_sinusoidal_center_follows_patch(self) -> None:
+        """PATCH on a sinusoidal register shifts its oscillation center."""
+        cfg = _minimal_config({
+            "holding": [{"address": 1, "name": "humidity", "default": 45.0, "scale": 10,
+                         "simulation": {"behavior": "sinusoidal",
+                                        "period_hours": 12, "amplitude": 5.0}}]
+        })
+        store = RegisterStore()
+        store.initialize(cfg.registers)
+        engine = SimulationEngine(store=store, config=cfg, seed=0)
+
+        # Shift center from 45.0%RH to 60.0%RH
+        store.set_holding(1, 600)
+        engine.update_base(1, 600)   # 600 / 10 = 60.0
+
+        # Run several ticks — output should oscillate around 600, not 450
+        for _ in range(5):
+            engine._tick(1.0)
+        value = store.get_holding(1)
+        # amplitude=5.0 → max deviation = 50 raw; center should be ~600
+        assert abs(value - 600) <= 55
 
     def test_unknown_address_is_noop(self) -> None:
         engine, _ = _make_engine()

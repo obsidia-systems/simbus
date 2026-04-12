@@ -188,7 +188,8 @@ class SimulationEngine:
     ) -> float:
         match cfg:
             case ConstantBehavior():
-                return default
+                # state.base is initialized from default; PATCH /registers updates it
+                return state.base
 
             case GaussianNoiseBehavior():
                 if cfg.drift and cfg.drift.enabled:
@@ -198,13 +199,12 @@ class SimulationEngine:
                 return behaviors.gaussian_noise(state.base, cfg.std_dev, self._rng)
 
             case SinusoidalBehavior():
-                center = default
+                # Use state.base as center (initialized from default, updatable via PATCH)
                 if cfg.drift and cfg.drift.enabled:
                     state.base = behaviors.drift_step(
                         state.base, cfg.drift.rate, cfg.drift.bounds
                     )
-                    center = state.base
-                return behaviors.sinusoidal(center, cfg.amplitude, cfg.period_hours, state.elapsed_s)
+                return behaviors.sinusoidal(state.base, cfg.amplitude, cfg.period_hours, state.elapsed_s)
 
             case DriftBehavior():
                 state.base = behaviors.drift_step(
