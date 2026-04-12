@@ -1,0 +1,68 @@
+name: "Generic T&H Sensor"
+version: "1.0"
+type: tnh_sensor
+description: >
+  Generic temperature and humidity sensor.
+  Models a two-register Modbus device typical of
+  environmental monitoring in hot/cold aisles.
+
+modbus:
+  default_port: 5020
+  unit_id: 1
+  endianness: big
+
+registers:
+  holding:
+    - address: 0
+      name: temperature
+      description: "Ambient temperature"
+      unit: "°C"
+      default: 22.5
+      scale: 10           # raw = real_value × 10  (e.g. 22.5 °C → 225)
+      data_type: uint16
+      simulation:
+        behavior: gaussian_noise
+        std_dev: 0.3
+        drift:
+          enabled: true
+          rate: 0.01       # °C per tick
+          bounds: [18.0, 35.0]
+
+    - address: 1
+      name: humidity
+      description: "Relative humidity"
+      unit: "%RH"
+      default: 45.0
+      scale: 10
+      data_type: uint16
+      simulation:
+        behavior: sinusoidal
+        period_hours: 12
+        amplitude: 5.0
+
+  coils:
+    - address: 0
+      name: high_temp_alarm
+      description: "High temperature alarm active"
+      default: false
+      trigger:
+        source_register: temperature
+        condition: gt
+        threshold: 30.0
+
+    - address: 1
+      name: low_humidity_alarm
+      description: "Low humidity alarm active"
+      default: false
+      trigger:
+        source_register: humidity
+        condition: lt
+        threshold: 30.0
+
+alarms:
+  - name: "High Temperature"
+    severity: warning
+    trigger: high_temp_alarm
+  - name: "Low Humidity"
+    severity: warning
+    trigger: low_humidity_alarm

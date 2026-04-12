@@ -1,10 +1,37 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
 [project]
 name = "simbus"
 version = "0.0.1"
-description = "Add your description here"
+description = "Industrial Field Device Simulator — Modbus TCP"
 readme = "README.md"
-requires-python = ">=3.12"
+requires-python = ">=3.14"
 dependencies = [
-    "fastapi>=0.135.3",
+    "fastapi[standard]>=0.135.3",
+    "pydantic>=2.12.5",
+    "pydantic-settings>=2.13.1",
     "pymodbus>=3.12.1",
+    "ruamel-yaml>=0.19.1",
+    "structlog>=25.5.0",
+    "typer>=0.24.1",
+    "uvicorn[standard]>=0.44.0",
 ]
+
+[project.scripts]
+simbus = "simbus.cli:app"
+
+[dependency-groups]
+dev = ["ruff", "mypy", "pytest", "pytest-asyncio", "httpx"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+
+[tool.mypy]
+strict = true
+python_version = "3.14"
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
