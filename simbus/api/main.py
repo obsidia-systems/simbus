@@ -15,7 +15,7 @@ All routers access device state via request.app.state.
 from __future__ import annotations
 
 import asyncio
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from typing import AsyncGenerator
 
 import structlog
@@ -61,6 +61,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     app.state.config = cfg
     app.state.store = store
     app.state.engine = engine
+    app.state.server = server
 
     # --- Start tasks ---
     server_task = asyncio.create_task(server.serve_forever(), name="modbus-server")

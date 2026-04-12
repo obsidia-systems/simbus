@@ -17,7 +17,8 @@ class StatusResponse(BaseModel):
     type: str
     modbus_port: int
     tick_interval: float
-    status: Literal["running", "fault"] = "running"
+    simulation: Literal["running", "stopped"] = "running"
+    modbus_server: Literal["listening", "stopped", "error"] = "stopped"
 
 
 # ---------------------------------------------------------------------------
