@@ -71,7 +71,7 @@ async def clear_faults(request: Request) -> None:
     summary="Update simulation parameters",
 )
 async def patch_simulation(body: SimulationPatchRequest, request: Request) -> dict[str, object]:
-    settings = request.app.state.settings
+    engine = request.app.state.engine
     if body.tick_interval is not None:
-        settings.tick_interval = body.tick_interval
-    return {"tick_interval": settings.tick_interval}
+        engine.tick_interval = body.tick_interval
+    return {"tick_interval": engine.tick_interval}

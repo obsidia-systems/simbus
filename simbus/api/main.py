@@ -50,7 +50,12 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # --- Initialize state ---
     store = RegisterStore()
     store.initialize(cfg.registers)
-    engine = SimulationEngine(store=store, config=cfg, seed=settings.seed)
+    engine = SimulationEngine(
+        store=store,
+        config=cfg,
+        seed=settings.seed,
+        tick_interval=settings.tick_interval,
+    )
 
     server = ModbusServerInstance(
         store=store,
@@ -66,7 +71,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # --- Start tasks ---
     server_task = asyncio.create_task(server.serve_forever(), name="modbus-server")
     engine_task = asyncio.create_task(
-        engine.run(tick_interval=settings.tick_interval),
+        engine.run(),
         name="simulation-engine",
     )
 

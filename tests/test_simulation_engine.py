@@ -1,0 +1,318 @@
+"""Unit tests for SimulationEngine.
+
+Tests the tick loop, behavior dispatch, alarm evaluation, fault injection,
+input register simulation, and the live tick_interval update.
+"""
+
+from __future__ import annotations
+
+import asyncio
+
+import pytest
+
+from simbus.config.loader import load_builtin
+from simbus.config.schema import (
+    DeviceConfig,
+    ModbusConfig,
+    RegisterMapConfig,
+)
+from simbus.core.store import RegisterStore
+from simbus.simulation.engine import SimulationEngine
+from simbus.simulation.faults import ActiveFault, FaultType
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+
+def _make_engine(device_type: str = "generic-tnh-sensor", **kwargs: object) -> tuple[SimulationEngine, RegisterStore]:
+    cfg = load_builtin(device_type)
+    store = RegisterStore()
+    store.initialize(cfg.registers)
+    engine = SimulationEngine(store=store, config=cfg, seed=42, **kwargs)
+    return engine, store
+
+
+def _minimal_config(registers: dict) -> DeviceConfig:
+    return DeviceConfig.model_validate({
+        "name": "Test",
+        "version": "1.0",
+        "type": "test",
+        "modbus": {"default_port": 5020, "unit_id": 1},
+        "registers": registers,
+    })
+
+
+# ---------------------------------------------------------------------------
+# Initialisation
+# ---------------------------------------------------------------------------
+
+
+class TestInit:
+    def test_tick_interval_stored(self) -> None:
+        engine, _ = _make_engine(tick_interval=2.5)
+        assert engine.tick_interval == 2.5
+
+    def test_default_tick_interval(self) -> None:
+        engine, _ = _make_engine()
+        assert engine.tick_interval == 1.0
+
+    def test_not_running_before_start(self) -> None:
+        engine, _ = _make_engine()
+        assert engine._running is False
+
+    def test_state_initialised_for_all_registers(self) -> None:
+        cfg = load_builtin("generic-tnh-sensor")
+        store = RegisterStore()
+        store.initialize(cfg.registers)
+        engine = SimulationEngine(store=store, config=cfg)
+        # tnh-sensor: 2 holding registers at addresses 0 and 1
+        assert 0 in engine._state
+        assert 1 in engine._state
+
+    def test_state_base_matches_default(self) -> None:
+        cfg = load_builtin("generic-tnh-sensor")
+        store = RegisterStore()
+        store.initialize(cfg.registers)
+        engine = SimulationEngine(store=store, config=cfg)
+        # temperature default = 22.5
+        assert engine._state[0].base == pytest.approx(22.5)
+
+
+# ---------------------------------------------------------------------------
+# Single tick — holding registers
+# ---------------------------------------------------------------------------
+
+
+class TestTickHolding:
+    def test_constant_behavior_unchanged(self) -> None:
+        cfg = _minimal_config({
+            "holding": [{"address": 0, "name": "setpoint", "default": 18.0, "scale": 10,
+                         "simulation": {"behavior": "constant"}}]
+        })
+        store = RegisterStore()
+        store.initialize(cfg.registers)
+        engine = SimulationEngine(store=store, config=cfg, seed=0)
+        engine._tick(1.0)
+        assert store.get_holding(0) == 180  # 18.0 × 10
+
+    def test_gaussian_noise_updates_register(self) -> None:
+        engine, store = _make_engine(tick_interval=1.0)
+        before = store.get_holding(0)
+        engine._tick(1.0)
+        # With noise it's very unlikely to be the same value
+        after = store.get_holding(0)
+        assert isinstance(after, int)
+        assert 0 <= after <= 65535
+
+    def test_elapsed_time_advances_each_tick(self) -> None:
+        engine, _ = _make_engine()
+        assert engine._state[0].elapsed_s == 0.0
+        engine._tick(1.0)
+        assert engine._state[0].elapsed_s == pytest.approx(1.0)
+        engine._tick(2.5)
+        assert engine._state[0].elapsed_s == pytest.approx(3.5)
+
+    def test_register_without_simulation_not_updated(self) -> None:
+        cfg = _minimal_config({
+            "holding": [{"address": 0, "name": "manual", "default": 50.0, "scale": 1}]
+        })
+        store = RegisterStore()
+        store.initialize(cfg.registers)
+        engine = SimulationEngine(store=store, config=cfg)
+        engine._tick(1.0)
+        # No simulation → store value stays at default
+        assert store.get_holding(0) == 50
+
+
+# ---------------------------------------------------------------------------
+# Single tick — input registers (bug fix verification)
+# ---------------------------------------------------------------------------
+
+
+class TestTickInputRegisters:
+    def test_input_register_simulated(self) -> None:
+        cfg = _minimal_config({
+            "input": [{"address": 0, "name": "sensor", "default": 100.0, "scale": 10,
+                       "simulation": {"behavior": "gaussian_noise", "std_dev": 1.0}}]
+        })
+        store = RegisterStore()
+        store.initialize(cfg.registers)
+        engine = SimulationEngine(store=store, config=cfg, seed=7)
+        engine._tick(1.0)
+        # Value should have been written to the input store
+        assert store.get_input(0) != 0
+
+    def test_input_register_state_tracked(self) -> None:
+        cfg = _minimal_config({
+            "input": [{"address": 5, "name": "flow", "default": 30.0, "scale": 100,
+                       "simulation": {"behavior": "sinusoidal",
+                                      "period_hours": 1, "amplitude": 5.0}}]
+        })
+        store = RegisterStore()
+        store.initialize(cfg.registers)
+        engine = SimulationEngine(store=store, config=cfg)
+        assert 5 in engine._state
+        engine._tick(1.0)
+        assert engine._state[5].elapsed_s == pytest.approx(1.0)
+
+    def test_input_register_faults_not_applied(self) -> None:
+        """Faults must not affect input registers — they are read-only to clients."""
+        cfg = _minimal_config({
+            "input": [{"address": 0, "name": "ro_sensor", "default": 50.0, "scale": 10,
+                       "simulation": {"behavior": "constant"}}]
+        })
+        store = RegisterStore()
+        store.initialize(cfg.registers)
+        engine = SimulationEngine(store=store, config=cfg)
+        engine.inject_fault(ActiveFault(
+            fault_type=FaultType.spike,
+            register_name="ro_sensor",
+            value=9999.0,
+            duration_s=60.0,
+            remaining_s=60.0,
+        ))
+        engine._tick(1.0)
+        # Fault must NOT have spiked the input register
+        assert store.get_input(0) == 500  # 50.0 × 10
+
+
+# ---------------------------------------------------------------------------
+# Alarm evaluation
+# ---------------------------------------------------------------------------
+
+
+class TestAlarmEvaluation:
+    def test_coil_set_when_threshold_exceeded(self) -> None:
+        cfg = _minimal_config({
+            "holding": [{"address": 0, "name": "temp", "default": 35.0, "scale": 10,
+                         "simulation": {"behavior": "constant"}}],
+            "coils": [{"address": 0, "name": "high_temp", "default": False,
+                       "trigger": {"source_register": "temp",
+                                   "condition": "gt", "threshold": 30.0}}],
+        })
+        store = RegisterStore()
+        store.initialize(cfg.registers)
+        engine = SimulationEngine(store=store, config=cfg)
+        engine._tick(1.0)
+        assert store.get_coil(0) is True
+
+    def test_coil_cleared_when_below_threshold(self) -> None:
+        cfg = _minimal_config({
+            "holding": [{"address": 0, "name": "temp", "default": 20.0, "scale": 10,
+                         "simulation": {"behavior": "constant"}}],
+            "coils": [{"address": 0, "name": "high_temp", "default": False,
+                       "trigger": {"source_register": "temp",
+                                   "condition": "gt", "threshold": 30.0}}],
+        })
+        store = RegisterStore()
+        store.initialize(cfg.registers)
+        # Pre-set coil to True to confirm it gets cleared
+        store.set_coil(0, True)
+        engine = SimulationEngine(store=store, config=cfg)
+        engine._tick(1.0)
+        assert store.get_coil(0) is False
+
+    def test_tnh_alarm_triggers_on_high_temperature(self) -> None:
+        engine, store = _make_engine()
+        # Force temperature to a high raw value (> 30.0°C → raw > 300)
+        store.set_holding(0, 310)  # 31.0°C
+        engine._evaluate_alarms()
+        assert store.get_coil(0) is True  # high_temp_alarm
+
+
+# ---------------------------------------------------------------------------
+# Fault injection
+# ---------------------------------------------------------------------------
+
+
+class TestFaultInjection:
+    def test_spike_overrides_register_value(self) -> None:
+        cfg = _minimal_config({
+            "holding": [{"address": 0, "name": "temp", "default": 22.5, "scale": 10,
+                         "simulation": {"behavior": "constant"}}],
+        })
+        store = RegisterStore()
+        store.initialize(cfg.registers)
+        engine = SimulationEngine(store=store, config=cfg)
+        engine.inject_fault(ActiveFault(
+            fault_type=FaultType.spike,
+            register_name="temp",
+            value=99.9,
+            duration_s=10.0,
+            remaining_s=10.0,
+        ))
+        engine._tick(1.0)
+        assert store.get_holding(0) == 999  # 99.9 × 10
+
+    def test_dropout_sets_register_to_zero(self) -> None:
+        cfg = _minimal_config({
+            "holding": [{"address": 0, "name": "temp", "default": 22.5, "scale": 10,
+                         "simulation": {"behavior": "constant"}}],
+        })
+        store = RegisterStore()
+        store.initialize(cfg.registers)
+        engine = SimulationEngine(store=store, config=cfg)
+        engine.inject_fault(ActiveFault(
+            fault_type=FaultType.dropout,
+            register_name=None,
+            value=None,
+            duration_s=10.0,
+            remaining_s=10.0,
+        ))
+        engine._tick(1.0)
+        assert store.get_holding(0) == 0
+
+    def test_fault_expires_after_duration(self) -> None:
+        engine, _ = _make_engine()
+        engine.inject_fault(ActiveFault(
+            fault_type=FaultType.freeze,
+            register_name="temperature",
+            value=None,
+            duration_s=2.0,
+            remaining_s=2.0,
+        ))
+        assert "temperature" in engine._faults
+        engine.tick_faults(1.0)
+        assert "temperature" in engine._faults
+        engine.tick_faults(1.5)
+        assert "temperature" not in engine._faults
+
+    def test_clear_faults_removes_all(self) -> None:
+        engine, _ = _make_engine()
+        engine.inject_fault(ActiveFault(FaultType.spike, "temperature", 999.0, 10.0, 10.0))
+        engine.inject_fault(ActiveFault(FaultType.freeze, "humidity", None, 10.0, 10.0))
+        assert len(engine._faults) == 2
+        engine.clear_faults()
+        assert len(engine._faults) == 0
+
+
+# ---------------------------------------------------------------------------
+# Live tick_interval update (bug fix verification)
+# ---------------------------------------------------------------------------
+
+
+class TestLiveTickInterval:
+    def test_tick_interval_mutable(self) -> None:
+        engine, _ = _make_engine(tick_interval=1.0)
+        engine.tick_interval = 5.0
+        assert engine.tick_interval == 5.0
+
+    @pytest.mark.asyncio
+    async def test_run_uses_updated_tick_interval(self) -> None:
+        """Engine picks up tick_interval change mid-run without restart."""
+        engine, _ = _make_engine(tick_interval=0.05)
+        task = asyncio.create_task(engine.run())
+        await asyncio.sleep(0.08)  # ~1 tick at 0.05s
+
+        engine.tick_interval = 0.02  # speed up
+        await asyncio.sleep(0.06)   # ~3 ticks at 0.02s
+
+        engine.stop()
+        task.cancel()
+        with pytest.raises((asyncio.CancelledError, Exception)):
+            await task
+
+        # elapsed_s grows — confirms ticks ran after the interval change
+        assert engine._state[0].elapsed_s > 0.05

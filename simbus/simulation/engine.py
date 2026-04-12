@@ -47,11 +47,15 @@ class SimulationEngine:
         store: RegisterStore,
         config: DeviceConfig,
         seed: int | None = None,
+        tick_interval: float = 1.0,
     ) -> None:
         self._store = store
         self._config = config
         self._rng = Random(seed)
         self._running = False
+
+        # Mutable — updated live via PATCH /simulation
+        self.tick_interval: float = tick_interval
 
         # Per-register simulation state keyed by address
         self._state: dict[int, _RegState] = {
@@ -69,13 +73,18 @@ class SimulationEngine:
     # Public API
     # -----------------------------------------------------------------------
 
-    async def run(self, tick_interval: float = 1.0) -> None:
-        """Run the tick loop until stop() is called."""
+    async def run(self) -> None:
+        """Run the tick loop until stop() is called.
+
+        Reads self.tick_interval on every iteration so that live updates
+        via PATCH /simulation take effect without restarting the engine.
+        """
         self._running = True
         while self._running:
-            self._tick(tick_interval)
+            dt = self.tick_interval
+            self._tick(dt)
             self._publish_snapshot()
-            await asyncio.sleep(tick_interval)
+            await asyncio.sleep(dt)
 
     def stop(self) -> None:
         """Signal the tick loop to stop after the current iteration."""
@@ -105,10 +114,17 @@ class SimulationEngine:
 
     def _tick(self, dt: float) -> None:
         self.tick_faults(dt)
+        self._tick_registers(self._config.registers.holding, is_input=False, dt=dt)
+        self._tick_registers(self._config.registers.input, is_input=True, dt=dt)
+        self._evaluate_alarms()
 
-        _reg_map = {r.name: r for r in self._config.registers.holding}
-
-        for reg in self._config.registers.holding:
+    def _tick_registers(
+        self,
+        registers: list,  # list[RegisterConfig]
+        is_input: bool,
+        dt: float,
+    ) -> None:
+        for reg in registers:
             state = self._state[reg.address]
             state.elapsed_s += dt
 
@@ -117,31 +133,34 @@ class SimulationEngine:
 
             new_val = self._compute(reg.default, reg.simulation, state)
 
-            # Apply faults that override the computed value
-            fault = self._faults.get(reg.name) or self._faults.get("_device")
-            if fault:
-                match fault.fault_type:
-                    case FaultType.spike | FaultType.alarm:
-                        if fault.value is not None:
-                            new_val = fault.value
-                    case FaultType.freeze:
-                        new_val = behaviors.raw_to_scaled(
-                            self._store.get_holding(reg.address), reg.scale
-                        )
-                    case FaultType.dropout:
-                        new_val = 0.0
-                    case FaultType.noise_amplify:
-                        amplified_std = (
-                            getattr(reg.simulation, "std_dev", 0.5)
-                            * (fault.value or 10.0)
-                        )
-                        new_val = behaviors.gaussian_noise(
-                            new_val, amplified_std, self._rng)
+            # Faults only apply to holding registers (input registers are read-only
+            # from the Modbus client perspective, so faults target holding only)
+            if not is_input:
+                fault = self._faults.get(reg.name) or self._faults.get("_device")
+                if fault:
+                    match fault.fault_type:
+                        case FaultType.spike | FaultType.alarm:
+                            if fault.value is not None:
+                                new_val = fault.value
+                        case FaultType.freeze:
+                            new_val = behaviors.raw_to_scaled(
+                                self._store.get_holding(reg.address), reg.scale
+                            )
+                        case FaultType.dropout:
+                            new_val = 0.0
+                        case FaultType.noise_amplify:
+                            amplified_std = (
+                                getattr(reg.simulation, "std_dev", 0.5)
+                                * (fault.value or 10.0)
+                            )
+                            new_val = behaviors.gaussian_noise(
+                                new_val, amplified_std, self._rng)
 
-            self._store.set_holding(
-                reg.address, behaviors.scale_to_raw(new_val, reg.scale))
-
-        self._evaluate_alarms()
+            raw = behaviors.scale_to_raw(new_val, reg.scale)
+            if is_input:
+                self._store.set_input(reg.address, raw)
+            else:
+                self._store.set_holding(reg.address, raw)
 
     def _compute(
         self,

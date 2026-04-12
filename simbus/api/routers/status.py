@@ -19,7 +19,7 @@ async def get_status(request: Request) -> StatusResponse:
         name=cfg.name,
         type=cfg.type,
         modbus_port=settings.modbus_port,
-        tick_interval=settings.tick_interval,
+        tick_interval=engine.tick_interval,
         simulation="running" if engine._running else "stopped",
         modbus_server=server.status,
     )
