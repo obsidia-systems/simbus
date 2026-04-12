@@ -11,7 +11,7 @@ Example .env:
 
 from __future__ import annotations
 
-from pydantic import Field, model_validator
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -41,8 +41,10 @@ class DeviceSettings(BaseSettings):
     api_port: int = Field(default=8000, ge=1024, le=65535)
 
     # Simulation
-    tick_interval: float = Field(default=1.0, gt=0, description="Tick interval in seconds")
-    seed: int | None = Field(default=None, description="RNG seed for reproducible behavior")
+    tick_interval: float = Field(
+        default=1.0, gt=0, description="Tick interval in seconds")
+    seed: int | None = Field(
+        default=None, description="RNG seed for reproducible behavior")
 
     # Optional name override (takes precedence over the YAML name field)
     device_name: str | None = Field(default=None)

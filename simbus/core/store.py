@@ -50,33 +50,41 @@ class RegisterStore:
     # --- Holding registers (read/write) ---
 
     def get_holding(self, address: int) -> int:
+        """Return the value of a holding register, or 0 if not set."""
         return self._holding.get(address, 0)
 
     def set_holding(self, address: int, value: int) -> None:
+        """Set the value of a holding register, masking to 16 bits."""
         self._holding[address] = value & 0xFFFF
 
     # --- Input registers (read-only by Modbus clients) ---
 
     def get_input(self, address: int) -> int:
+        """Return the value of an input register, or 0 if not set."""
         return self._input.get(address, 0)
 
     def set_input(self, address: int, value: int) -> None:
+        """Set the value of an input register, masking to 16 bits."""
         self._input[address] = value & 0xFFFF
 
     # --- Coils (read/write) ---
 
     def get_coil(self, address: int) -> bool:
+        """Return the value of a coil, or False if not set."""
         return self._coils.get(address, False)
 
     def set_coil(self, address: int, value: bool) -> None:
+        """Set the value of a coil."""
         self._coils[address] = value
 
     # --- Discrete inputs (read-only by Modbus clients) ---
 
     def get_discrete(self, address: int) -> bool:
+        """Return the value of a discrete input, or False if not set."""
         return self._discrete.get(address, False)
 
     def set_discrete(self, address: int, value: bool) -> None:
+        """Set the value of a discrete input."""
         self._discrete[address] = value
 
     def snapshot(self) -> RegisterSnapshot:
@@ -92,18 +100,22 @@ class RegisterStore:
 
     @property
     def holding_raw(self) -> dict[int, int]:
+        """Return the raw dict of holding register values."""
         return self._holding
 
     @property
     def input_raw(self) -> dict[int, int]:
+        """Return the raw dict of input register values."""
         return self._input
 
     @property
     def coils_raw(self) -> dict[int, bool]:
+        """Return the raw dict of coil values."""
         return self._coils
 
     @property
     def discrete_raw(self) -> dict[int, bool]:
+        """Return the raw dict of discrete input values."""
         return self._discrete
 
 

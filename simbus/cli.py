@@ -43,7 +43,8 @@ def start(
     name: Optional[str] = typer.Option(None, "--name", "-n", help="Override device name"),  # noqa: UP007
     api_port: int = typer.Option(8000, "--api-port", help="REST API port"),
     host: str = typer.Option("0.0.0.0", "--host", help="Bind address"),  # noqa: S104
-    tick: float = typer.Option(1.0, "--tick", help="Simulation tick interval (seconds)"),
+    tick: float = typer.Option(
+        1.0, "--tick", help="Simulation tick interval (seconds)"),
     seed: Optional[int] = typer.Option(None, "--seed", help="RNG seed for reproducibility"),  # noqa: UP007
 ) -> None:
     """Start a virtual device with its Modbus server and REST API."""
@@ -67,5 +68,6 @@ def start(
 
     fastapi_app = create_app(settings=settings)
 
-    typer.echo(f"Starting '{name or device_type or file}' — Modbus :{port}  API :{api_port}")
+    typer.echo(
+        f"Starting '{name or device_type or file}' — Modbus :{port}  API :{api_port}")
     uvicorn.run(fastapi_app, host=host, port=api_port, log_level="info")

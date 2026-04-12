@@ -11,38 +11,41 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, Field, model_validator
 
-
 # ---------------------------------------------------------------------------
 # Enumerations
 # ---------------------------------------------------------------------------
 
 
 class Endianness(StrEnum):
-    big = "big"
-    little = "little"
-    big_swap = "big_swap"
-    little_swap = "little_swap"
+    """Modbus register byte order. "big" is the most common, but some devices use "little"."""
+    BIG = "big"
+    LITTLE = "little"
+    BIG_SWAP = "big_swap"
+    LITTLE_SWAP = "little_swap"
 
 
 class DataType(StrEnum):
-    uint16 = "uint16"
-    int16 = "int16"
-    uint32 = "uint32"
-    float32 = "float32"
+    """Data types for registers. Determines how raw register values are interpreted."""
+    UINT16 = "uint16"
+    INT16 = "int16"
+    UINT32 = "uint32"
+    FLOAT32 = "float32"
 
 
 class TriggerCondition(StrEnum):
-    gt = "gt"
-    lt = "lt"
-    eq = "eq"
-    gte = "gte"
-    lte = "lte"
+    """Condition for activating a coil trigger or alarm."""
+    GT = "gt"
+    LT = "lt"
+    EQ = "eq"
+    GTE = "gte"
+    LTE = "lte"
 
 
 class AlarmSeverity(StrEnum):
-    info = "info"
-    warning = "warning"
-    critical = "critical"
+    """Severity levels for alarms."""
+    INFO = "info"
+    WARNING = "warning"
+    CRITICAL = "critical"
 
 
 # ---------------------------------------------------------------------------
@@ -51,7 +54,7 @@ class AlarmSeverity(StrEnum):
 
 
 class DriftModifier(BaseModel):
-    """Optional drift applied on top of another behavior (gaussian_noise, sinusoidal)."""
+    """Optional drift applied on top of another behavior(gaussian_noise, sinusoidal)."""
 
     enabled: bool = True
     rate: float
@@ -65,25 +68,31 @@ class DriftModifier(BaseModel):
 
 
 class ConstantBehavior(BaseModel):
+    """Behavior that always returns the same value (no "ticks" or time component)."""
     behavior: Literal["constant"]
 
 
 class GaussianNoiseBehavior(BaseModel):
+    """Behavior that adds normally distributed noise to a base value."""
     behavior: Literal["gaussian_noise"]
     std_dev: float = Field(gt=0, description="Standard deviation of the noise")
     drift: DriftModifier | None = None
 
 
 class SinusoidalBehavior(BaseModel):
+    """Behavior that simulates a sinusoidal waveform."""
     behavior: Literal["sinusoidal"]
-    period_hours: float = Field(gt=0, description="Oscillation period in hours")
+    period_hours: float = Field(
+        gt=0, description="Oscillation period in hours")
     amplitude: float = Field(gt=0, description="Peak deviation from center")
     drift: DriftModifier | None = None
 
 
 class DriftBehavior(BaseModel):
+    """Behavior that simulates a steady drift over time, with optional bounds."""
     behavior: Literal["drift"]
-    rate: float = Field(description="Change per tick (negative = downward drift)")
+    rate: float = Field(
+        description="Change per tick (negative = downward drift)")
     bounds: tuple[float, float]
 
     @model_validator(mode="after")
@@ -94,6 +103,7 @@ class DriftBehavior(BaseModel):
 
 
 class SawtoothBehavior(BaseModel):
+    """Behavior that simulates a sawtooth waveform."""
     behavior: Literal["sawtooth"]
     period_seconds: float = Field(gt=0)
     min: float
@@ -107,11 +117,13 @@ class SawtoothBehavior(BaseModel):
 
 
 class StepEntry(BaseModel):
+    """Defines a single step change at a specific time."""
     at: float = Field(ge=0, description="Seconds from simulation start")
     value: float
 
 
 class StepBehavior(BaseModel):
+    """Behavior that simulates discrete step changes at specified times."""
     behavior: Literal["step"]
     steps: list[StepEntry] = Field(min_length=1)
 
@@ -133,23 +145,27 @@ BehaviorConfig = Annotated[
 
 
 class RegisterConfig(BaseModel):
+    """Configuration for a single holding/input register."""
     address: int = Field(ge=0, le=65535)
     name: str
     description: str = ""
     unit: str = ""
     default: float
     scale: int = Field(default=1, ge=1, description="raw = real_value × scale")
-    data_type: DataType = DataType.uint16
+    data_type: DataType = DataType.UINT16
     simulation: BehaviorConfig | None = None
 
 
 class TriggerConfig(BaseModel):
-    source_register: str = Field(description="Name of the holding/input register to watch")
+    """Configuration for a coil trigger that activates based on a register value."""
+    source_register: str = Field(
+        description="Name of the holding/input register to watch")
     condition: TriggerCondition
     threshold: float
 
 
 class CoilConfig(BaseModel):
+    """Configuration for a single coil/discrete input."""
     address: int = Field(ge=0, le=65535)
     name: str
     description: str = ""
@@ -158,6 +174,7 @@ class CoilConfig(BaseModel):
 
 
 class RegisterMapConfig(BaseModel):
+    """Complete register map for the device, including holding registers, input registers, coils, and discrete inputs."""
     holding: list[RegisterConfig] = []
     input: list[RegisterConfig] = []
     coils: list[CoilConfig] = []
@@ -170,9 +187,10 @@ class RegisterMapConfig(BaseModel):
 
 
 class ModbusConfig(BaseModel):
+    """Configuration for the Modbus server, including communication parameters and defaults."""
     default_port: int = Field(ge=1024, le=65535)
     unit_id: int = Field(default=1, ge=1, le=247)
-    endianness: Endianness = Endianness.big
+    endianness: Endianness = Endianness.BIG
 
 
 # ---------------------------------------------------------------------------
@@ -181,9 +199,11 @@ class ModbusConfig(BaseModel):
 
 
 class AlarmConfig(BaseModel):
+    """Configuration for an alarm that is triggered by a coil and has a specified severity level."""
     name: str
     severity: AlarmSeverity
-    trigger: str = Field(description="Name of the coil that activates this alarm")
+    trigger: str = Field(
+        description="Name of the coil that activates this alarm")
 
 
 # ---------------------------------------------------------------------------
@@ -192,6 +212,7 @@ class AlarmConfig(BaseModel):
 
 
 class DeviceConfig(BaseModel):
+    """Top-level configuration for a virtual Modbus device, including metadata, Modbus settings, register map, and alarms."""
     name: str
     version: str
     type: str

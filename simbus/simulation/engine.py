@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import asyncio
 import json
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from random import Random
 
 from simbus.config.schema import (
@@ -78,20 +78,24 @@ class SimulationEngine:
             await asyncio.sleep(tick_interval)
 
     def stop(self) -> None:
+        """Signal the tick loop to stop after the current iteration."""
         self._running = False
 
     def inject_fault(self, fault: ActiveFault) -> None:
+        """Inject a fault that will affect register values on the next tick."""
         key = fault.register_name or "_device"
         self._faults[key] = fault
 
     def clear_faults(self) -> None:
+        """Clear all active faults immediately."""
         self._faults.clear()
 
     def tick_faults(self, dt: float) -> None:
         """Decrement fault timers; remove expired faults."""
         for f in self._faults.values():
             f.remaining_s -= dt
-        expired = [key for key, f in self._faults.items() if f.remaining_s <= 0]
+        expired = [key for key, f in self._faults.items()
+                   if f.remaining_s <= 0]
         for key in expired:
             del self._faults[key]
 
@@ -102,7 +106,7 @@ class SimulationEngine:
     def _tick(self, dt: float) -> None:
         self.tick_faults(dt)
 
-        reg_map = {r.name: r for r in self._config.registers.holding}
+        _reg_map = {r.name: r for r in self._config.registers.holding}
 
         for reg in self._config.registers.holding:
             state = self._state[reg.address]
@@ -131,9 +135,11 @@ class SimulationEngine:
                             getattr(reg.simulation, "std_dev", 0.5)
                             * (fault.value or 10.0)
                         )
-                        new_val = behaviors.gaussian_noise(new_val, amplified_std, self._rng)
+                        new_val = behaviors.gaussian_noise(
+                            new_val, amplified_std, self._rng)
 
-            self._store.set_holding(reg.address, behaviors.scale_to_raw(new_val, reg.scale))
+            self._store.set_holding(
+                reg.address, behaviors.scale_to_raw(new_val, reg.scale))
 
         self._evaluate_alarms()
 
@@ -169,7 +175,8 @@ class SimulationEngine:
                 return behaviors.sinusoidal(center, cfg.amplitude, cfg.period_hours, state.elapsed_s)
 
             case DriftBehavior():
-                state.base = behaviors.drift_step(state.base, cfg.rate, cfg.bounds)
+                state.base = behaviors.drift_step(
+                    state.base, cfg.rate, cfg.bounds)
                 return state.base
 
             case SawtoothBehavior():

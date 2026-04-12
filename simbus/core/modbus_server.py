@@ -16,8 +16,6 @@ Architecture:
 
 from __future__ import annotations
 
-import asyncio
-
 import structlog
 from pymodbus.datastore import ModbusDeviceContext, ModbusServerContext
 from pymodbus.datastore.store import BaseModbusDataBlock
@@ -54,6 +52,7 @@ class _HoldingBlock(BaseModbusDataBlock):
         self._store = store
 
     def validate(self, address: int, count: int = 1) -> bool:
+        """Always accept the request and let the store handle out-of-range addresses."""
         return True
 
     def getValues(self, address: int, count: int = 1) -> list[int]:
@@ -76,6 +75,7 @@ class _InputBlock(BaseModbusDataBlock):
         self._store = store
 
     def validate(self, address: int, count: int = 1) -> bool:
+        """Always accept the request and let the store handle out-of-range addresses."""
         return True
 
     def getValues(self, address: int, count: int = 1) -> list[int]:
@@ -96,6 +96,7 @@ class _CoilBlock(BaseModbusDataBlock):
         self._store = store
 
     def validate(self, address: int, count: int = 1) -> bool:
+        """Always accept the request and let the store handle out-of-range addresses."""
         return True
 
     def getValues(self, address: int, count: int = 1) -> list[bool]:
@@ -118,6 +119,7 @@ class _DiscreteBlock(BaseModbusDataBlock):
         self._store = store
 
     def validate(self, address: int, count: int = 1) -> bool:
+        """Always accept the request and let the store handle out-of-range addresses."""
         return True
 
     def getValues(self, address: int, count: int = 1) -> list[bool]:
@@ -170,7 +172,8 @@ class ModbusServerInstance:
         )
 
         self._status = "listening"
-        logger.info("modbus server listening", port=self._port, unit_id=self._unit_id)
+        logger.info("modbus server listening",
+                    port=self._port, unit_id=self._unit_id)
         try:
             await self._server.serve_forever()
         except Exception:
@@ -189,12 +192,15 @@ class ModbusServerInstance:
 
     @property
     def status(self) -> str:
+        """Current status: 'stopped', 'listening', or 'error'."""
         return self._status
 
     @property
     def port(self) -> int:
+        """TCP port number the server is listening on (or was configured to listen on)."""
         return self._port
 
     @property
     def unit_id(self) -> int:
+        """Unit ID of the Modbus device."""
         return self._unit_id
