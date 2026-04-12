@@ -22,6 +22,7 @@ import structlog
 from fastapi import FastAPI
 
 from simbus.config.loader import load_builtin, load_from_file
+from simbus.core.modbus_server import ModbusServerInstance
 from simbus.core.store import RegisterStore
 from simbus.settings import DeviceSettings
 from simbus.simulation.engine import SimulationEngine
@@ -51,11 +52,18 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     store.initialize(cfg.registers)
     engine = SimulationEngine(store=store, config=cfg, seed=settings.seed)
 
+    server = ModbusServerInstance(
+        store=store,
+        port=settings.modbus_port,
+        unit_id=cfg.modbus.unit_id,
+    )
+
     app.state.config = cfg
     app.state.store = store
     app.state.engine = engine
 
-    # --- Start simulation task ---
+    # --- Start tasks ---
+    server_task = asyncio.create_task(server.serve_forever(), name="modbus-server")
     engine_task = asyncio.create_task(
         engine.run(tick_interval=settings.tick_interval),
         name="simulation-engine",
@@ -74,10 +82,11 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # --- Graceful shutdown ---
     engine.stop()
     engine_task.cancel()
-    try:
-        await engine_task
-    except asyncio.CancelledError:
-        pass
+    await server.stop()
+    server_task.cancel()
+    for task in (engine_task, server_task):
+        with suppress(asyncio.CancelledError):
+            await task
 
     logger.info("simbus stopped", device=cfg.name)
 
