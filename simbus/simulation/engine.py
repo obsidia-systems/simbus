@@ -238,14 +238,14 @@ class SimulationEngine:
 
 def _check_condition(value: float, condition: TriggerCondition, threshold: float) -> bool:
     match condition:
-        case TriggerCondition.gt:
+        case TriggerCondition.GT:
             return value > threshold
-        case TriggerCondition.lt:
+        case TriggerCondition.LT:
             return value < threshold
-        case TriggerCondition.eq:
+        case TriggerCondition.EQ:
             return value == threshold
-        case TriggerCondition.gte:
+        case TriggerCondition.GTE:
             return value >= threshold
-        case TriggerCondition.lte:
+        case TriggerCondition.LTE:
             return value <= threshold
     return False
