@@ -1,0 +1,207 @@
+# Papouch TH2E — Ethernet Temperature & Humidity Sensor
+#
+# Product:  Papouch TH2E
+# Ref:      https://cdn.en.papouch.com/data/user-content/products/th2e/th2e_en.pdf
+#
+# NOTE ON NAMING
+#   You may know this device as "STE2 Papouch". The STE2 is actually an HW Group
+#   product (hw-group.com) that uses SNMP — it has no Modbus support. The Papouch
+#   device that matches the T&H + Modbus TCP feature set is the TH2E.
+#
+# REGISTER LAYOUT
+#   All measurements are exposed as INPUT registers (FC4, read-only).
+#   Each measurement channel occupies 4 addresses:
+#     +0  Status  UINT16  (0=valid, 1=not ready, 2=over-range, 3=under-range, 4=error)
+#     +1  Value   INT16   signed, divide by 10 → real value  (simulated here)
+#     +2  Float   MSB of IEEE-754 float32 (not simulated — beyond simbus uint16 scope)
+#     +3  Float   LSB of IEEE-754 float32 (not simulated)
+#
+#   Channels:
+#     0x0000–0x0003   Temperature
+#     0x0004–0x0007   Humidity
+#     0x0008–0x000B   Dew point (device-calculated)
+#
+# ALARM COILS (simbus extension)
+#   The real TH2E has no Modbus coil output for alarms — thresholds are
+#   configured via the web UI. The four coils below are added as a simbus
+#   layer so SCADA can poll alarm state over Modbus without custom scripting.
+#
+# COLD AISLE CONTEXT
+#   Default values reflect a healthy cold aisle at ASHRAE A2 target conditions:
+#   intake temperature 18–27 °C, humidity 40–60 %RH.
+#   Alarm thresholds follow ASHRAE TC 9.9 recommended envelope.
+
+name: "Papouch TH2E"
+version: "1.0"
+type: papouch_th2e
+description: >
+  Papouch TH2E Ethernet thermometer and hygrometer.
+  Modbus TCP, all values read-only (FC4 input registers), INT16 × 10 scale.
+  Configured for cold aisle monitoring at ASHRAE A2 target conditions.
+
+modbus:
+  # Real TH2E factory default is port 512, but ports < 1024 require root on Linux.
+  # Map to 5512 for container use (set SIMBUS_MODBUS_PORT=512 only if running as root).
+  default_port: 5512
+  unit_id: 1
+  endianness: big
+
+registers:
+  input:
+
+    # ── Temperature channel (base 0x0000) ─────────────────────────────────
+    - address: 0
+      name: temperature_status
+      description: >
+        Temperature channel status.
+        0=valid, 1=not ready, 2=over-range (>125 °C), 3=under-range (<-55 °C), 4=sensor error.
+      unit: ""
+      default: 0.0
+      scale: 1
+      data_type: uint16
+      simulation:
+        behavior: constant      # healthy sensor always returns 0 (valid)
+
+    - address: 1
+      name: temperature
+      description: >
+        Ambient temperature. INT16, raw = real × 10 (e.g. raw 180 = 18.0 °C).
+        Sensor range: -55 to +125 °C. Accuracy: ±0.5 °C (-10 to +85 °C).
+      unit: "°C"
+      default: 18.0
+      scale: 10
+      data_type: int16
+      simulation:
+        behavior: gaussian_noise
+        std_dev: 0.1          # ±0.1 °C noise represents ±0.5 °C accuracy class
+        drift:
+          enabled: true
+          rate: 0.004         # slow creep upward (server heat load effect)
+          bounds: [15.0, 27.0]
+
+    # ── Humidity channel (base 0x0004) ────────────────────────────────────
+    - address: 4
+      name: humidity_status
+      description: >
+        Humidity channel status.
+        0=valid, 1=not ready, 2=over-range (>100 %RH), 3=under-range (<0 %RH), 4=sensor error.
+      unit: ""
+      default: 0.0
+      scale: 1
+      data_type: uint16
+      simulation:
+        behavior: constant
+
+    - address: 5
+      name: humidity
+      description: >
+        Relative humidity. INT16, raw = real × 10 (e.g. raw 450 = 45.0 %RH).
+        Sensor range: 0–100 %RH. Recommended operating range: 20–80 %RH.
+        Accuracy: ±2 %RH. Resolution: 0.1 %RH.
+      unit: "%RH"
+      default: 45.0
+      scale: 10
+      data_type: uint16
+      simulation:
+        behavior: sinusoidal
+        period_hours: 24      # natural daily humidity cycle
+        amplitude: 4.0        # ±4 %RH over 24 h
+        drift:
+          enabled: true
+          rate: -0.001        # very slow drying trend
+          bounds: [30.0, 65.0]
+
+    # ── Dew point channel (base 0x0008) ───────────────────────────────────
+    - address: 8
+      name: dewpoint_status
+      description: >
+        Dew point channel status.
+        0=valid, 1=not ready, 2=over-range, 3=under-range, 4=sensor error.
+      unit: ""
+      default: 0.0
+      scale: 1
+      data_type: uint16
+      simulation:
+        behavior: constant
+
+    - address: 9
+      name: dewpoint
+      description: >
+        Calculated dew point temperature. INT16, raw = real × 10.
+        Derived from temperature and humidity — not a direct sensor reading.
+        At T=18.0 °C / RH=45 %RH → dew point ≈ 5.9 °C (Magnus formula).
+        Accuracy follows the combined T and RH sensor errors.
+      unit: "°C"
+      default: 6.0
+      scale: 10
+      data_type: int16
+      simulation:
+        behavior: gaussian_noise
+        std_dev: 0.2          # slightly wider noise — compound of T and RH errors
+
+  coils:
+    # ── Simbus-added alarm coils (not present on the real TH2E Modbus map) ──
+    # These allow SCADA to poll alarm state via FC1/FC5 without scripting.
+    # Thresholds are based on ASHRAE TC 9.9 recommended envelope for cold aisles.
+
+    - address: 0
+      name: high_temp_alarm
+      description: >
+        Cold aisle temperature above upper threshold.
+        ASHRAE A2 recommendation: cold aisle intake ≤ 27 °C.
+        Alarm fires at 25 °C to provide early warning before reaching the limit.
+      default: false
+      trigger:
+        source_register: temperature
+        condition: gt
+        threshold: 25.0
+
+    - address: 1
+      name: low_temp_alarm
+      description: >
+        Cold aisle temperature below safe minimum.
+        Temperatures below 10 °C risk condensation on equipment and thermal shock.
+      default: false
+      trigger:
+        source_register: temperature
+        condition: lt
+        threshold: 10.0
+
+    - address: 2
+      name: high_humidity_alarm
+      description: >
+        Humidity above condensation risk threshold.
+        ASHRAE recommends ≤ 60 %RH; alarm fires at 65 %RH.
+      default: false
+      trigger:
+        source_register: humidity
+        condition: gt
+        threshold: 65.0
+
+    - address: 3
+      name: low_humidity_alarm
+      description: >
+        Humidity below static discharge risk threshold.
+        ASHRAE recommends ≥ 40 %RH; alarm fires at 30 %RH for early warning.
+      default: false
+      trigger:
+        source_register: humidity
+        condition: lt
+        threshold: 30.0
+
+alarms:
+  - name: "High Cold Aisle Temperature"
+    severity: warning
+    trigger: high_temp_alarm
+
+  - name: "Low Cold Aisle Temperature"
+    severity: warning
+    trigger: low_temp_alarm
+
+  - name: "High Humidity — Condensation Risk"
+    severity: warning
+    trigger: high_humidity_alarm
+
+  - name: "Low Humidity — Static Discharge Risk"
+    severity: warning
+    trigger: low_humidity_alarm
