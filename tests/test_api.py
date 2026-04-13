@@ -148,12 +148,20 @@ class TestGetRegisters:
 
 
 class TestPatchRegister:
-    def test_override_temperature(self, client: TestClient) -> None:
+    def test_override_temperature_raw(self, client: TestClient) -> None:
         r = client.patch("/registers/0", json={"value": 300})
         assert r.status_code == 200
         data = r.json()
         assert data["address"] == 0
-        assert data["value"] == 300
+        assert data["raw_value"] == 300
+        assert data["real_value"] == pytest.approx(30.0)  # scale=10
+
+    def test_override_temperature_real_value(self, client: TestClient) -> None:
+        r = client.patch("/registers/0", json={"real_value": 27.0})
+        assert r.status_code == 200
+        data = r.json()
+        assert data["raw_value"] == 270
+        assert data["real_value"] == pytest.approx(27.0)
 
     def test_override_reflects_in_snapshot(self, client: TestClient) -> None:
         client.patch("/registers/0", json={"value": 199})
@@ -170,6 +178,14 @@ class TestPatchRegister:
 
     def test_value_cannot_be_negative(self, client: TestClient) -> None:
         r = client.patch("/registers/0", json={"value": -1})
+        assert r.status_code == 422
+
+    def test_rejects_both_fields(self, client: TestClient) -> None:
+        r = client.patch("/registers/0", json={"value": 270, "real_value": 27.0})
+        assert r.status_code == 422
+
+    def test_rejects_neither_field(self, client: TestClient) -> None:
+        r = client.patch("/registers/0", json={})
         assert r.status_code == 422
 
     def test_restore_default_temperature(self, client: TestClient) -> None:

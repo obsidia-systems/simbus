@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 # ---------------------------------------------------------------------------
@@ -75,7 +75,28 @@ class RegisterSnapshotResponse(BaseModel):
 
 
 class RegisterOverrideRequest(BaseModel):
-    value: int = Field(ge=0, le=65535, description="Raw uint16 register value")
+    value: int | None = Field(
+        default=None,
+        ge=0,
+        le=65535,
+        description="Raw register value (uint16, 0–65535). Use this when you know the Modbus wire value.",
+    )
+    real_value: float | None = Field(
+        default=None,
+        description=(
+            "Real-world value in physical units (e.g. 27.0 for 27.0 °C). "
+            "The API applies the register's scale automatically. "
+            "Mutually exclusive with 'value'."
+        ),
+    )
+
+    @model_validator(mode="after")
+    def _exactly_one_field(self) -> RegisterOverrideRequest:
+        if self.value is None and self.real_value is None:
+            raise ValueError("Provide 'value' (raw uint16) or 'real_value' (physical units).")
+        if self.value is not None and self.real_value is not None:
+            raise ValueError("'value' and 'real_value' are mutually exclusive.")
+        return self
 
 
 class CoilOverrideRequest(BaseModel):
