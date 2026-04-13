@@ -127,6 +127,19 @@ services:
       - "8004:8004"
     profiles: ["power", "all"]
 
+  # -- Custom device example (uncomment to enable) --------------------------------
+  papouch-th2e:
+    <<: *simbus-defaults
+    container_name: simbus-papouch-th2e
+    volumes:
+    - ./devices:/app/devices:ro   # monta en tiempo de ejecución, sin rebuild
+    environment:
+      SIMBUS_YAML_PATH: "/app/devices/papouch-th2e.yaml"
+    ports:
+      - "5512:5512"
+      - "8012:8012"
+    profiles: ["custom", "all"]
+
 networks:
   simbus:
     driver: bridge
