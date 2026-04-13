@@ -78,6 +78,10 @@ class RegisterOverrideRequest(BaseModel):
     value: int = Field(ge=0, le=65535, description="Raw uint16 register value")
 
 
+class CoilOverrideRequest(BaseModel):
+    value: bool = Field(description="Coil state to set (true / false)")
+
+
 # ---------------------------------------------------------------------------
 # Faults
 # ---------------------------------------------------------------------------

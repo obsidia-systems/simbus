@@ -16,6 +16,8 @@ Architecture:
 
 from __future__ import annotations
 
+from collections.abc import Callable
+
 import structlog
 from pymodbus.datastore import ModbusDeviceContext, ModbusServerContext
 from pymodbus.datastore.store import BaseModbusDataBlock
@@ -46,10 +48,21 @@ def _addr(address: int) -> int:
 
 
 class _HoldingBlock(BaseModbusDataBlock):
-    """Holding registers (FC3 read / FC6, FC16 write)."""
+    """Holding registers (FC3 read / FC6, FC16 write).
 
-    def __init__(self, store: RegisterStore) -> None:
+    The optional `on_write` callback is invoked for each register written by a
+    Modbus client (FC6 / FC16). The simulation engine passes `engine.update_base`
+    here so that an external write (e.g. a SCADA setpoint change) shifts the
+    simulation operating point — identical behaviour to PATCH /registers/{address}.
+    """
+
+    def __init__(
+        self,
+        store: RegisterStore,
+        on_write: Callable[[int, int], None] | None = None,
+    ) -> None:
         self._store = store
+        self._on_write = on_write
 
     def validate(self, address: int, count: int = 1) -> bool:
         """Always accept the request and let the store handle out-of-range addresses."""
@@ -62,7 +75,11 @@ class _HoldingBlock(BaseModbusDataBlock):
     def setValues(self, address: int, values: list[int]) -> None:
         base = _addr(address)
         for i, v in enumerate(values):
-            self._store.set_holding(base + i, int(v))
+            addr = base + i
+            raw = int(v)
+            self._store.set_holding(addr, raw)
+            if self._on_write is not None:
+                self._on_write(addr, raw)
 
     def reset(self) -> None:
         pass
@@ -149,23 +166,33 @@ class ModbusServerInstance:
         task.cancel()
     """
 
-    def __init__(self, store: RegisterStore, port: int, unit_id: int) -> None:
+    def __init__(
+        self,
+        store: RegisterStore,
+        port: int,
+        unit_id: int,
+        on_holding_write: Callable[[int, int], None] | None = None,
+    ) -> None:
         """
         Args:
             store: RegisterStore whose values are served over Modbus TCP.
             port: TCP port to listen on.
             unit_id: Modbus unit ID (1–247).
+            on_holding_write: Optional callback invoked on every FC6/FC16 write —
+                receives (address, raw_value). Pass ``engine.update_base`` to keep
+                the simulation operating point in sync with SCADA setpoint changes.
         """
         self._store = store
         self._port = port
         self._unit_id = unit_id
+        self._on_holding_write = on_holding_write
         self._server: ModbusTcpServer | None = None
         self._status: str = "stopped"  # "stopped" | "listening" | "error"
 
     async def serve_forever(self) -> None:
         """Build the pymodbus server and run until cancelled."""
         device_ctx = ModbusDeviceContext(
-            hr=_HoldingBlock(self._store),
+            hr=_HoldingBlock(self._store, on_write=self._on_holding_write),
             ir=_InputBlock(self._store),
             co=_CoilBlock(self._store),
             di=_DiscreteBlock(self._store),

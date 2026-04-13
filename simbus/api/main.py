@@ -62,6 +62,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         store=store,
         port=settings.modbus_port,
         unit_id=cfg.modbus.unit_id,
+        on_holding_write=engine.update_base,
     )
 
     app.state.config = cfg

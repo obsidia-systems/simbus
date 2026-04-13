@@ -25,7 +25,7 @@ from typing import AsyncGenerator
 from fastapi import APIRouter, HTTPException, Request, status
 from fastapi.responses import StreamingResponse
 
-from simbus.api.schemas import ErrorResponse, RegisterOverrideRequest, RegisterSnapshotResponse
+from simbus.api.schemas import CoilOverrideRequest, ErrorResponse, RegisterOverrideRequest, RegisterSnapshotResponse
 
 router = APIRouter()
 
@@ -68,6 +68,32 @@ async def override_register(
         )
     store.set_holding(address, body.value)
     request.app.state.engine.update_base(address, body.value)
+    return {"address": address, "value": body.value}
+
+
+@router.patch(
+    "/coils/{address}",
+    responses={404: {"model": ErrorResponse}},
+    summary="Override a coil value",
+)
+async def override_coil(
+    address: int,
+    body: CoilOverrideRequest,
+    request: Request,
+) -> dict[str, object]:
+    """Write a boolean value to a coil.
+
+    For coils with a trigger condition: the value takes effect immediately but
+    will be overwritten on the next engine tick if the trigger condition is still
+    active. Use this to manually clear or set static coils (those without a trigger).
+    """
+    store = request.app.state.store
+    if address not in store.coils_raw:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Coil {address} not found on this device",
+        )
+    store.set_coil(address, body.value)
     return {"address": address, "value": body.value}
 
 
