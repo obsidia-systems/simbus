@@ -16,7 +16,7 @@ class FaultType(StrEnum):
     spike = "spike"               # Force a register to an extreme value for a duration
     freeze = "freeze"             # Stop updating a register (stuck sensor)
     dropout = "dropout"           # Set register to 0 (loss of signal)
-    alarm = "alarm"               # Force a coil to active state
+    alarm = "alarm"               # Force a named coil to True, bypassing trigger evaluation
     noise_amplify = "noise_amplify"  # Multiply noise std_dev by a factor
 
 

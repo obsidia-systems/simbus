@@ -163,7 +163,7 @@ class SimulationEngine:
                 fault = self._faults.get(reg.name) or self._faults.get("_device")
                 if fault:
                     match fault.fault_type:
-                        case FaultType.spike | FaultType.alarm:
+                        case FaultType.spike:
                             if fault.value is not None:
                                 new_val = fault.value
                         case FaultType.freeze:
@@ -233,13 +233,23 @@ class SimulationEngine:
         return default  # unreachable — exhaustive match
 
     def _evaluate_alarms(self) -> None:
-        """Update coil states based on holding register values and trigger conditions."""
+        """Update coil and discrete states based on register values and trigger conditions.
+
+        For coils, an active `alarm` fault targeting the coil by name forces it to True,
+        bypassing the normal trigger evaluation.
+        """
         reg_by_name = {
             r.name: r
             for r in self._config.registers.holding + self._config.registers.input
         }
 
-        for coil in self._config.registers.coils + self._config.registers.discrete:
+        for coil in self._config.registers.coils:
+            # alarm fault targeting this coil by name takes priority over trigger logic
+            alarm_fault = self._faults.get(coil.name)
+            if alarm_fault and alarm_fault.fault_type == FaultType.alarm:
+                self._store.set_coil(coil.address, True)
+                continue
+
             if coil.trigger is None:
                 continue
 
@@ -253,6 +263,21 @@ class SimulationEngine:
                 scaled, coil.trigger.condition, coil.trigger.threshold
             )
             self._store.set_coil(coil.address, triggered)
+
+        for disc in self._config.registers.discrete:
+            if disc.trigger is None:
+                continue
+
+            source = reg_by_name.get(disc.trigger.source_register)
+            if source is None:
+                continue
+
+            raw = self._store.get_holding(source.address)
+            scaled = behaviors.raw_to_scaled(raw, source.scale)
+            triggered = _check_condition(
+                scaled, disc.trigger.condition, disc.trigger.threshold
+            )
+            self._store.set_discrete(disc.address, triggered)
 
     def _publish_snapshot(self) -> None:
         """Push a JSON snapshot to all active SSE subscriber queues."""

@@ -234,6 +234,99 @@ class TestAlarmEvaluation:
         engine._evaluate_alarms()
         assert store.get_coil(0) is True  # high_temp_alarm
 
+    def test_discrete_trigger_uses_set_discrete(self) -> None:
+        """Discrete inputs must be written via set_discrete, not set_coil."""
+        cfg = _minimal_config({
+            "holding": [{"address": 0, "name": "level", "default": 90.0, "scale": 1,
+                         "simulation": {"behavior": "constant"}}],
+            "discrete": [{"address": 0, "name": "overflow", "default": False,
+                          "trigger": {"source_register": "level",
+                                      "condition": "gt", "threshold": 80.0}}],
+        })
+        store = RegisterStore()
+        store.initialize(cfg.registers)
+        engine = SimulationEngine(store=store, config=cfg)
+        engine._tick(1.0)
+        # Must be in discrete store, not coil store
+        assert store.get_discrete(0) is True
+        assert store.get_coil(0) is False  # coil store untouched
+
+    def test_alarm_fault_forces_coil_true(self) -> None:
+        """alarm fault must force the named coil to True regardless of register value."""
+        cfg = _minimal_config({
+            "holding": [{"address": 0, "name": "temp", "default": 20.0, "scale": 10,
+                         "simulation": {"behavior": "constant"}}],
+            "coils": [{"address": 0, "name": "high_temp", "default": False,
+                       "trigger": {"source_register": "temp",
+                                   "condition": "gt", "threshold": 30.0}}],
+        })
+        store = RegisterStore()
+        store.initialize(cfg.registers)
+        engine = SimulationEngine(store=store, config=cfg)
+        # Temperature is 20°C — below threshold, coil should normally be False
+        engine._tick(1.0)
+        assert store.get_coil(0) is False
+
+        # Inject alarm fault targeting the coil by name
+        engine.inject_fault(ActiveFault(
+            fault_type=FaultType.alarm,
+            register_name="high_temp",
+            value=None,
+            duration_s=10.0,
+            remaining_s=10.0,
+        ))
+        engine._tick(1.0)
+        # Coil must be forced True even though register is below threshold
+        assert store.get_coil(0) is True
+
+    def test_alarm_fault_does_not_affect_register(self) -> None:
+        """alarm fault must not spike the holding register value."""
+        cfg = _minimal_config({
+            "holding": [{"address": 0, "name": "temp", "default": 20.0, "scale": 10,
+                         "simulation": {"behavior": "constant"}}],
+            "coils": [{"address": 0, "name": "high_temp", "default": False,
+                       "trigger": {"source_register": "temp",
+                                   "condition": "gt", "threshold": 30.0}}],
+        })
+        store = RegisterStore()
+        store.initialize(cfg.registers)
+        engine = SimulationEngine(store=store, config=cfg)
+        engine.inject_fault(ActiveFault(
+            fault_type=FaultType.alarm,
+            register_name="high_temp",
+            value=None,
+            duration_s=10.0,
+            remaining_s=10.0,
+        ))
+        engine._tick(1.0)
+        # Register must stay at 20.0°C (200 raw) — alarm fault only touches the coil
+        assert store.get_holding(0) == 200
+
+    def test_alarm_fault_clears_after_expiry(self) -> None:
+        """After the alarm fault expires, coil should return to normal trigger evaluation."""
+        cfg = _minimal_config({
+            "holding": [{"address": 0, "name": "temp", "default": 20.0, "scale": 10,
+                         "simulation": {"behavior": "constant"}}],
+            "coils": [{"address": 0, "name": "high_temp", "default": False,
+                       "trigger": {"source_register": "temp",
+                                   "condition": "gt", "threshold": 30.0}}],
+        })
+        store = RegisterStore()
+        store.initialize(cfg.registers)
+        engine = SimulationEngine(store=store, config=cfg)
+        engine.inject_fault(ActiveFault(
+            fault_type=FaultType.alarm,
+            register_name="high_temp",
+            value=None,
+            duration_s=5.0,
+            remaining_s=5.0,
+        ))
+        engine._tick(1.0)   # remaining_s → 4.0 → fault still active → coil True
+        assert store.get_coil(0) is True
+
+        engine._tick(10.0)  # remaining_s → -6.0 → fault expired → temp 20°C < 30°C → False
+        assert store.get_coil(0) is False
+
 
 # ---------------------------------------------------------------------------
 # Fault injection
