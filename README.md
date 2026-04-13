@@ -561,6 +561,11 @@ simbus/
     └── test_api.py                # Full API integration (42 tests)
 ```
 
+### Documentation
+
+- [docs/simulation.md](docs/simulation.md) — Full simulation engine reference: every behavior,
+  the drift modifier, alarm triggers, all fault types, and practical recipes.
+
 ### Contributing
 
 Contributions are welcome. Open an issue first to discuss significant changes.
