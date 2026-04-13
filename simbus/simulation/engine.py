@@ -235,13 +235,13 @@ class SimulationEngine:
     def _evaluate_alarms(self) -> None:
         """Update coil and discrete states based on register values and trigger conditions.
 
-        For coils, an active `alarm` fault targeting the coil by name forces it to True,
-        bypassing the normal trigger evaluation.
+        Trigger sources may be holding OR input registers — the correct store is chosen
+        automatically. For coils, an active `alarm` fault targeting the coil by name
+        forces it to True, bypassing the normal trigger evaluation.
         """
-        reg_by_name = {
-            r.name: r
-            for r in self._config.registers.holding + self._config.registers.input
-        }
+        holding_by_name = {r.name: r for r in self._config.registers.holding}
+        input_by_name = {r.name: r for r in self._config.registers.input}
+        reg_by_name = {**holding_by_name, **input_by_name}
 
         for coil in self._config.registers.coils:
             # alarm fault targeting this coil by name takes priority over trigger logic
@@ -257,7 +257,10 @@ class SimulationEngine:
             if source is None:
                 continue
 
-            raw = self._store.get_holding(source.address)
+            if coil.trigger.source_register in input_by_name:
+                raw = self._store.get_input(source.address)
+            else:
+                raw = self._store.get_holding(source.address)
             scaled = behaviors.raw_to_scaled(raw, source.scale)
             triggered = _check_condition(
                 scaled, coil.trigger.condition, coil.trigger.threshold
@@ -272,7 +275,10 @@ class SimulationEngine:
             if source is None:
                 continue
 
-            raw = self._store.get_holding(source.address)
+            if disc.trigger.source_register in input_by_name:
+                raw = self._store.get_input(source.address)
+            else:
+                raw = self._store.get_holding(source.address)
             scaled = behaviors.raw_to_scaled(raw, source.scale)
             triggered = _check_condition(
                 scaled, disc.trigger.condition, disc.trigger.threshold

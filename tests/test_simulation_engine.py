@@ -227,6 +227,22 @@ class TestAlarmEvaluation:
         engine._tick(1.0)
         assert store.get_coil(0) is False
 
+    def test_coil_trigger_from_input_register(self) -> None:
+        """Coil triggers must read from the input store when source is an input register."""
+        cfg = _minimal_config({
+            "input": [{"address": 0, "name": "temp_ro", "default": 35.0, "scale": 10,
+                       "simulation": {"behavior": "constant"}}],
+            "coils": [{"address": 0, "name": "high_temp", "default": False,
+                       "trigger": {"source_register": "temp_ro",
+                                   "condition": "gt", "threshold": 30.0}}],
+        })
+        store = RegisterStore()
+        store.initialize(cfg.registers)
+        engine = SimulationEngine(store=store, config=cfg)
+        engine._tick(1.0)
+        # Input register was written by the engine; coil trigger must read from input store
+        assert store.get_coil(0) is True
+
     def test_tnh_alarm_triggers_on_high_temperature(self) -> None:
         engine, store = _make_engine()
         # Force temperature to a high raw value (> 30.0°C → raw > 300)
