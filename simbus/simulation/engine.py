@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import time
 from dataclasses import dataclass
 from random import Random
 
@@ -51,6 +52,7 @@ class SimulationEngine:
         config: DeviceConfig,
         seed: int | None = None,
         tick_interval: float = 1.0,
+        tick_health_log_interval: float = 60.0,
     ) -> None:
         self._store = store
         self._config = config
@@ -59,6 +61,7 @@ class SimulationEngine:
 
         # Mutable — updated live via PATCH /simulation
         self.tick_interval: float = tick_interval
+        self.tick_health_log_interval: float = tick_health_log_interval
 
         # Per-register simulation state keyed by address
         self._state: dict[int, _RegState] = {
@@ -72,6 +75,9 @@ class SimulationEngine:
         # SSE subscriber queues — populated by the API layer
         self.sse_queues: list[asyncio.Queue[str]] = []
 
+        self._started_monotonic: float | None = None
+        self._next_health_log_at: float | None = None
+
     # -----------------------------------------------------------------------
     # Public API
     # -----------------------------------------------------------------------
@@ -83,10 +89,21 @@ class SimulationEngine:
         via PATCH /simulation take effect without restarting the engine.
         """
         self._running = True
+        self._started_monotonic = time.monotonic()
+        self._next_health_log_at = self._started_monotonic + self.tick_health_log_interval
         while self._running:
             dt = self.tick_interval
+            tick_started = time.monotonic()
             self._tick(dt)
             self._publish_snapshot()
+            tick_finished = time.monotonic()
+            tick_duration_ms = (tick_finished - tick_started) * 1000.0
+            loop_drift_ms = max(0.0, (tick_finished - tick_started - dt) * 1000.0)
+            self._log_tick_health_if_due(
+                now=tick_finished,
+                tick_duration_ms=tick_duration_ms,
+                loop_drift_ms=loop_drift_ms,
+            )
             await asyncio.sleep(dt)
 
     def stop(self) -> None:
@@ -366,6 +383,30 @@ class SimulationEngine:
         for q in self.sse_queues:
             if not q.full():
                 q.put_nowait(payload)
+
+    def _log_tick_health_if_due(
+        self,
+        now: float,
+        tick_duration_ms: float,
+        loop_drift_ms: float,
+    ) -> None:
+        """Emit a low-frequency health log for the simulation loop."""
+        if self._next_health_log_at is None or self._started_monotonic is None:
+            return
+        if now < self._next_health_log_at:
+            return
+
+        logger.info(
+            "simulation tick health",
+            source="simulation",
+            tick_interval=self.tick_interval,
+            tick_duration_ms=round(tick_duration_ms, 3),
+            loop_drift_ms=round(loop_drift_ms, 3),
+            sse_subscribers=len(self.sse_queues),
+            active_faults=len(self._faults),
+            uptime_s=round(now - self._started_monotonic, 3),
+        )
+        self._next_health_log_at = now + self.tick_health_log_interval
 
 
 # ---------------------------------------------------------------------------

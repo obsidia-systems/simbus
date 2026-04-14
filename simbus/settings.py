@@ -43,6 +43,11 @@ class DeviceSettings(BaseSettings):
     # Simulation
     tick_interval: float = Field(
         default=1.0, gt=0, description="Tick interval in seconds")
+    tick_health_log_interval: float = Field(
+        default=60.0,
+        gt=0,
+        description="How often to emit simulation tick health logs, in seconds.",
+    )
     seed: int | None = Field(
         default=None, description="RNG seed for reproducible behavior")
 

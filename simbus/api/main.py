@@ -57,6 +57,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         config=cfg,
         seed=settings.seed,
         tick_interval=settings.tick_interval,
+        tick_health_log_interval=settings.tick_health_log_interval,
     )
 
     server = ModbusServerInstance(
