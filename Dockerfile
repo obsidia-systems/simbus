@@ -61,7 +61,21 @@ HEALTHCHECK \
              'http://localhost:' + os.getenv('SIMBUS_API_PORT','8000') + '/status' \
          )"
 
-# All config is read from SIMBUS_* env vars at startup.
-# The module-level `app = create_app()` in main.py picks up DeviceSettings().
-# exec replaces the shell so uvicorn receives SIGTERM directly (clean shutdown).
-CMD ["/bin/sh", "-c", "exec uvicorn simbus.api.main:app --host 0.0.0.0 --port \"${SIMBUS_API_PORT:-8000}\" --log-level info"]
+# Start through the simbus CLI so logging and runtime behavior stay consistent
+# across local runs, tests, and containers.
+CMD ["/bin/sh", "-c", "\
+if [ -n \"${SIMBUS_YAML_PATH:-}\" ]; then \
+  exec simbus \
+    --file \"${SIMBUS_YAML_PATH}\" \
+    --port \"${SIMBUS_MODBUS_PORT:-5020}\" \
+    --api-port \"${SIMBUS_API_PORT:-8000}\" \
+    --host \"${SIMBUS_API_HOST:-0.0.0.0}\" \
+    --tick \"${SIMBUS_TICK_INTERVAL:-1.0}\"; \
+else \
+  exec simbus \
+    --type \"${SIMBUS_DEVICE_TYPE:-generic-tnh-sensor}\" \
+    --port \"${SIMBUS_MODBUS_PORT:-5020}\" \
+    --api-port \"${SIMBUS_API_PORT:-8000}\" \
+    --host \"${SIMBUS_API_HOST:-0.0.0.0}\" \
+    --tick \"${SIMBUS_TICK_INTERVAL:-1.0}\"; \
+fi"]

@@ -70,4 +70,10 @@ def start(
 
     typer.echo(
         f"Starting '{name or device_type or file}' — Modbus :{port}  API :{api_port}")
-    uvicorn.run(fastapi_app, host=host, port=api_port, log_level="info")
+    uvicorn.run(
+        fastapi_app,
+        host=host,
+        port=api_port,
+        log_level="warning",
+        access_log=False,
+    )

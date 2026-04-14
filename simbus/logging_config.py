@@ -20,6 +20,8 @@ def configure_logging() -> None:
         return
 
     logging.basicConfig(level=logging.INFO, format="%(message)s")
+    logging.getLogger("pymodbus").setLevel(logging.CRITICAL)
+    logging.getLogger("uvicorn.access").setLevel(logging.CRITICAL)
 
     structlog.configure(
         processors=[

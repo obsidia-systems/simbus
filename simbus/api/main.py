@@ -85,6 +85,12 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         modbus_port=settings.modbus_port,
         tick_interval=settings.tick_interval,
     )
+    logger.info(
+        "api listening",
+        host=settings.api_host,
+        port=settings.api_port,
+        device=cfg.name,
+    )
 
     yield
 
