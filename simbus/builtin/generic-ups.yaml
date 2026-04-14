@@ -7,7 +7,7 @@ description: >
   and runtime remaining — common registers on APC, Eaton, and Vertiv UPS units.
 
 modbus:
-  default_port: 5021
+  default_port: 502
   unit_id: 1
   endianness: big
 

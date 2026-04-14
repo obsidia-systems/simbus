@@ -11,13 +11,14 @@
 #   docker compose up --profile power        # power-related group
 #
 # Port map:
-#   tnh-sensor    Modbus 5020  API 8000
-#   ups           Modbus 5021  API 8001
-#   pdu           Modbus 5022  API 8002
-#   crac          Modbus 5023  API 8003
-#   power-meter   Modbus 5024  API 8004
-#   leak-sensor   Modbus 5025  API 8005
-#   door-contact  Modbus 5026  API 8006
+#   tnh-sensor    Host 5020 -> Container 502    API 8000 -> 8000
+#   ups           Host 5021 -> Container 502    API 8001 -> 8000
+#   pdu           Host 5022 -> Container 502    API 8002 -> 8000
+#   crac          Host 5023 -> Container 502    API 8003 -> 8000
+#   power-meter   Host 5024 -> Container 502    API 8004 -> 8000
+#   leak-sensor   Host 5025 -> Container 502    API 8005 -> 8000
+#   door-contact  Host 5026 -> Container 502    API 8006 -> 8000
+#   papouch-th2e  Host 551x -> Container 512    API 810x -> 8000
 
 x-simbus-defaults: &simbus-defaults
   build:
@@ -25,6 +26,8 @@ x-simbus-defaults: &simbus-defaults
     dockerfile: Dockerfile
     target: runtime
   restart: unless-stopped
+  cap_add:
+    - NET_BIND_SERVICE
   networks:
     - simbus
 
@@ -37,11 +40,9 @@ services:
     container_name: simbus-tnh-sensor
     environment:
       SIMBUS_DEVICE_TYPE: generic-tnh-sensor
-      SIMBUS_MODBUS_PORT: "5020"
-      SIMBUS_API_PORT: "8000"
       SIMBUS_TICK_INTERVAL: "1.0"
     ports:
-      - "5020:5020"   # Modbus TCP
+      - "5020:502"    # Modbus TCP
       - "8000:8000"   # REST API
     profiles: ["env", "all"]
 
@@ -50,12 +51,10 @@ services:
     container_name: simbus-leak-sensor
     environment:
       SIMBUS_DEVICE_TYPE: generic-leak-sensor
-      SIMBUS_MODBUS_PORT: "5025"
-      SIMBUS_API_PORT: "8005"
       SIMBUS_TICK_INTERVAL: "1.0"
     ports:
-      - "5025:5025"
-      - "8005:8005"
+      - "5025:502"
+      - "8005:8000"
     profiles: ["env", "all"]
 
   door-contact:
@@ -63,12 +62,10 @@ services:
     container_name: simbus-door-contact
     environment:
       SIMBUS_DEVICE_TYPE: generic-door-contact
-      SIMBUS_MODBUS_PORT: "5026"
-      SIMBUS_API_PORT: "8006"
       SIMBUS_TICK_INTERVAL: "1.0"
     ports:
-      - "5026:5026"
-      - "8006:8006"
+      - "5026:502"
+      - "8006:8000"
     profiles: ["env", "all"]
 
   # ── Cooling ────────────────────────────────────────────────────────────────
@@ -78,12 +75,10 @@ services:
     container_name: simbus-crac
     environment:
       SIMBUS_DEVICE_TYPE: generic-crac
-      SIMBUS_MODBUS_PORT: "5023"
-      SIMBUS_API_PORT: "8003"
       SIMBUS_TICK_INTERVAL: "1.0"
     ports:
-      - "5023:5023"
-      - "8003:8003"
+      - "5023:502"
+      - "8003:8000"
     profiles: ["cooling", "all"]
 
   # ── Power ──────────────────────────────────────────────────────────────────
@@ -93,12 +88,10 @@ services:
     container_name: simbus-ups
     environment:
       SIMBUS_DEVICE_TYPE: generic-ups
-      SIMBUS_MODBUS_PORT: "5021"
-      SIMBUS_API_PORT: "8001"
       SIMBUS_TICK_INTERVAL: "1.0"
     ports:
-      - "5021:5021"
-      - "8001:8001"
+      - "5021:502"
+      - "8001:8000"
     profiles: ["power", "all"]
 
   pdu:
@@ -106,12 +99,10 @@ services:
     container_name: simbus-pdu
     environment:
       SIMBUS_DEVICE_TYPE: generic-pdu
-      SIMBUS_MODBUS_PORT: "5022"
-      SIMBUS_API_PORT: "8002"
       SIMBUS_TICK_INTERVAL: "1.0"
     ports:
-      - "5022:5022"
-      - "8002:8002"
+      - "5022:502"
+      - "8002:8000"
     profiles: ["power", "all"]
 
   power-meter:
@@ -119,12 +110,10 @@ services:
     container_name: simbus-power-meter
     environment:
       SIMBUS_DEVICE_TYPE: generic-power-meter
-      SIMBUS_MODBUS_PORT: "5024"
-      SIMBUS_API_PORT: "8004"
       SIMBUS_TICK_INTERVAL: "1.0"
     ports:
-      - "5024:5024"
-      - "8004:8004"
+      - "5024:502"
+      - "8004:8000"
     profiles: ["power", "all"]
 
   # -- Custom device example (uncomment to enable) --------------------------------
@@ -135,6 +124,9 @@ services:
     - ./devices:/app/devices:ro   # monta en tiempo de ejecución, sin rebuild
     environment:
       SIMBUS_YAML_PATH: "/app/devices/papouch-th2e.yaml"
+    ports:
+      - "5512:512"
+      - "8100:8000"
     profiles: ["custom", "all"]
 
   papouch-th2e-02:
@@ -144,6 +136,9 @@ services:
     - ./devices:/app/devices:ro   # monta en tiempo de ejecución, sin rebuild
     environment:
       SIMBUS_YAML_PATH: "/app/devices/papouch-th2e.yaml"
+    ports:
+      - "5513:512"
+      - "8101:8000"
     profiles: ["custom", "all"]
 
   papouch-th2e-03:
@@ -153,6 +148,9 @@ services:
     - ./devices:/app/devices:ro   # monta en tiempo de ejecución, sin rebuild
     environment:
       SIMBUS_YAML_PATH: "/app/devices/papouch-th2e.yaml"
+    ports:
+      - "5514:512"
+      - "8102:8000"
     profiles: ["custom", "all"]
 
   papouch-th2e-04:
@@ -162,6 +160,9 @@ services:
     - ./devices:/app/devices:ro   # monta en tiempo de ejecución, sin rebuild
     environment:
       SIMBUS_YAML_PATH: "/app/devices/papouch-th2e.yaml"
+    ports:
+      - "5515:512"
+      - "8103:8000"
     profiles: ["custom", "all"]
 
 networks:

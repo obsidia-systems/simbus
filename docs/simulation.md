@@ -850,8 +850,9 @@ The RNG is seeded once at startup — every run produces the same sequence of
 `gaussian_noise` values, making test assertions deterministic.
 
 ```bash
-docker run -e SIMBUS_SEED=42 -e SIMBUS_DEVICE_TYPE=generic-tnh-sensor \
-  -p 5020:5020 -p 8000:8000 simbus:latest
+docker run --cap-add NET_BIND_SERVICE \
+  -e SIMBUS_SEED=42 -e SIMBUS_DEVICE_TYPE=generic-tnh-sensor \
+  -p 5020:502 -p 8000:8000 simbus:latest
 ```
 
 ---

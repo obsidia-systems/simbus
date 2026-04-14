@@ -36,7 +36,7 @@ class DeviceSettings(BaseSettings):
     )
 
     # Network
-    modbus_port: int = Field(default=5020, ge=1024, le=65535)
+    modbus_port: int | None = Field(default=None, ge=1, le=65535)
     api_host: str = Field(default="0.0.0.0")  # noqa: S104
     api_port: int = Field(default=8000, ge=1024, le=65535)
 

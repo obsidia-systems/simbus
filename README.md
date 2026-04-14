@@ -21,13 +21,13 @@ and operator training — **no hardware required**.
 ┌──────────────────────────────────────────────────────────────────────┐
 │  docker compose --profile all up                                     │
 │                                                                      │
-│   simbus-tnh-sensor    ── Modbus :5020 ── REST API :8000            │
-│   simbus-ups           ── Modbus :5021 ── REST API :8001            │
-│   simbus-pdu           ── Modbus :5022 ── REST API :8002            │
-│   simbus-crac          ── Modbus :5023 ── REST API :8003            │
-│   simbus-power-meter   ── Modbus :5024 ── REST API :8004            │
-│   simbus-leak-sensor   ── Modbus :5025 ── REST API :8005            │
-│   simbus-door-contact  ── Modbus :5026 ── REST API :8006            │
+│   simbus-tnh-sensor    ── Host :5020 → Device :502   API :8000→8000│
+│   simbus-ups           ── Host :5021 → Device :502   API :8001→8000│
+│   simbus-pdu           ── Host :5022 → Device :502   API :8002→8000│
+│   simbus-crac          ── Host :5023 → Device :502   API :8003→8000│
+│   simbus-power-meter   ── Host :5024 → Device :502   API :8004→8000│
+│   simbus-leak-sensor   ── Host :5025 → Device :502   API :8005→8000│
+│   simbus-door-contact  ── Host :5026 → Device :502   API :8006→8000│
 └──────────────────────────────────────────────────────────────────────┘
           │                                  │
    Ignition / SCADA                   Your GUI / Tests
@@ -92,7 +92,7 @@ curl http://localhost:8000/status
 {
   "name": "Generic T&H Sensor",
   "type": "tnh_sensor",
-  "modbus_port": 5020,
+  "modbus_port": 502,
   "tick_interval": 1.0,
   "simulation": "running",
   "modbus_server": "listening"
@@ -105,7 +105,7 @@ curl http://localhost:8000/status
 git clone https://github.com/your-org/simbus.git
 cd simbus
 uv sync
-simbus start --type generic-tnh-sensor --port 5020 --api-port 8000
+simbus --type generic-tnh-sensor --port 502 --api-port 8000
 ```
 
 > **Requirements:** Python 3.14+, Docker (optional)
@@ -117,15 +117,15 @@ simbus start --type generic-tnh-sensor --port 5020 --api-port 8000
 Seven devices ship ready to use. Each has a realistic register map, trigger-based alarms,
 and physics-appropriate simulation.
 
-| Device | Type key | Modbus | API | Holding | Coils |
-| --- | --- | --- | --- | --- | --- |
-| 🌡️ T&H Sensor | `generic-tnh-sensor` | 5020 | 8000 | 2 | 2 |
-| 🔋 UPS | `generic-ups` | 5021 | 8001 | 6 | 4 |
-| ⚡ PDU | `generic-pdu` | 5022 | 8002 | 6 | 3 |
-| ❄️ CRAC Unit | `generic-crac` | 5023 | 8003 | 6 | 4 + 1 discrete |
-| 📊 Power Meter | `generic-power-meter` | 5024 | 8004 | 12 | 3 |
-| 💧 Leak Sensor | `generic-leak-sensor` | 5025 | 8005 | 4 | 3 + 1 discrete |
-| 🚪 Door Contact | `generic-door-contact` | 5026 | 8006 | 3 | 4 + 2 discrete |
+| Device | Type key | Device Modbus | Device API | Example host map | Holding | Coils |
+| --- | --- | --- | --- | --- | --- | --- |
+| 🌡️ T&H Sensor | `generic-tnh-sensor` | 502 | 8000 | `5020:502`, `8000:8000` | 2 | 2 |
+| 🔋 UPS | `generic-ups` | 502 | 8000 | `5021:502`, `8001:8000` | 6 | 4 |
+| ⚡ PDU | `generic-pdu` | 502 | 8000 | `5022:502`, `8002:8000` | 6 | 3 |
+| ❄️ CRAC Unit | `generic-crac` | 502 | 8000 | `5023:502`, `8003:8000` | 6 | 4 + 1 discrete |
+| 📊 Power Meter | `generic-power-meter` | 502 | 8000 | `5024:502`, `8004:8000` | 12 | 3 |
+| 💧 Leak Sensor | `generic-leak-sensor` | 502 | 8000 | `5025:502`, `8005:8000` | 4 | 3 + 1 discrete |
+| 🚪 Door Contact | `generic-door-contact` | 502 | 8000 | `5026:502`, `8006:8000` | 3 | 4 + 2 discrete |
 
 Inspect any running device's full register map:
 
@@ -369,7 +369,7 @@ In **Gateway → Config → OPC-UA → Device Connections → Add → Modbus TCP
 | Field | Value |
 | --- | --- |
 | Hostname | `localhost` (or container service name if both are in Docker) |
-| Port | `5020` for tnh-sensor, `5021` for ups… |
+| Port | Host port (`5020` for tnh-sensor, `5021` for ups…). Device port is typically `502` internally |
 | Unit ID | `1` |
 
 **Ignition uses 1-based addressing:**
@@ -462,7 +462,7 @@ All settings use the `SIMBUS_` prefix and can be set via environment variables o
 | --- | --- | --- |
 | `SIMBUS_DEVICE_TYPE` | `generic-tnh-sensor` | Built-in device type to simulate |
 | `SIMBUS_YAML_PATH` | — | Path to a custom YAML (overrides `DEVICE_TYPE`) |
-| `SIMBUS_MODBUS_PORT` | `5020` | Modbus TCP listen port |
+| `SIMBUS_MODBUS_PORT` | device YAML default | Override Modbus TCP listen port |
 | `SIMBUS_API_PORT` | `8000` | REST API listen port |
 | `SIMBUS_TICK_INTERVAL` | `1.0` | Simulation tick in seconds |
 | `SIMBUS_TICK_HEALTH_LOG_INTERVAL` | `60.0` | Periodic simulation loop health log interval in seconds |
@@ -474,7 +474,6 @@ All settings use the `SIMBUS_` prefix and can be set via environment variables o
 
 ```env
 SIMBUS_DEVICE_TYPE=generic-ups
-SIMBUS_MODBUS_PORT=5021
 SIMBUS_API_PORT=8001
 SIMBUS_TICK_INTERVAL=1.0
 SIMBUS_TICK_HEALTH_LOG_INTERVAL=60.0
@@ -530,8 +529,9 @@ dumps so container output stays focused on simulation activity and control event
 docker build -t simbus:latest .
 
 docker run -d \
+  --cap-add NET_BIND_SERVICE \
   -e SIMBUS_DEVICE_TYPE=generic-tnh-sensor \
-  -p 5020:5020 -p 8000:8000 \
+  -p 5020:502 -p 8000:8000 \
   --name simbus-tnh \
   simbus:latest
 ```
@@ -549,6 +549,12 @@ docker compose up tnh-sensor ups crac    # handpick devices
 The image is a two-stage build (`python:3.14-slim` + uv), runs as a non-root user, and includes
 a healthcheck that polls `GET /status` every 15 seconds. Containers start through the
 `simbus` CLI so Docker behavior matches local runs and uses the same logging setup.
+
+Generic built-in devices listen on Modbus TCP port `502` inside the container and
+on API port `8000`. `docker-compose.yml` maps them to unique host ports (`5020`,
+`5021`, `8000`, `8001`, etc.). Custom or real devices use the port declared in
+their YAML by default. For example, the Papouch TH2E keeps its real device port
+`512` internally and is mapped to a high host port such as `5512`.
 
 ---
 
@@ -574,8 +580,8 @@ uv run pytest --cov=simbus --cov-report=html  # coverage report
 
 ```bash
 fastapi dev simbus/api/main.py                      # default device, hot-reload
-simbus --type generic-ups --port 5021 --api-port 8001
-simbus --file ./my-device.yaml --port 5030 --api-port 8030
+simbus --type generic-ups --port 502 --api-port 8000
+simbus --file ./my-device.yaml --port 512 --api-port 8000
 ```
 
 ### Project structure

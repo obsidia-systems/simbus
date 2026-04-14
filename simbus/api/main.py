@@ -59,10 +59,11 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         tick_interval=settings.tick_interval,
         tick_health_log_interval=settings.tick_health_log_interval,
     )
+    effective_modbus_port = settings.modbus_port or cfg.modbus.default_port
 
     server = ModbusServerInstance(
         store=store,
-        port=settings.modbus_port,
+        port=effective_modbus_port,
         unit_id=cfg.modbus.unit_id,
         on_holding_write=engine.update_base,
     )
@@ -85,7 +86,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         device=cfg.name,
         type=cfg.type,
         api_port=settings.api_port,
-        modbus_port=settings.modbus_port,
+        modbus_port=effective_modbus_port,
         tick_interval=settings.tick_interval,
     )
     logger.info(

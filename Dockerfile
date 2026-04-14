@@ -29,7 +29,6 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PATH="/app/.venv/bin:$PATH" \
     # Defaults — override via env vars or docker-compose
     SIMBUS_DEVICE_TYPE="generic-tnh-sensor" \
-    SIMBUS_MODBUS_PORT="5020" \
     SIMBUS_API_PORT="8000" \
     SIMBUS_TICK_INTERVAL="1.0"
 
@@ -48,7 +47,7 @@ USER simbus
 # REST API
 EXPOSE 8000
 # Modbus TCP — clients connect here
-EXPOSE 5020
+EXPOSE 502
 
 HEALTHCHECK \
     --interval=15s \
@@ -64,18 +63,20 @@ HEALTHCHECK \
 # Start through the simbus CLI so logging and runtime behavior stay consistent
 # across local runs, tests, and containers.
 CMD ["/bin/sh", "-c", "\
+PORT_ARG=\"\"; \
+if [ -n \"${SIMBUS_MODBUS_PORT:-}\" ]; then PORT_ARG=\"--port ${SIMBUS_MODBUS_PORT}\"; fi; \
 if [ -n \"${SIMBUS_YAML_PATH:-}\" ]; then \
   exec simbus \
     --file \"${SIMBUS_YAML_PATH}\" \
-    --port \"${SIMBUS_MODBUS_PORT:-5020}\" \
     --api-port \"${SIMBUS_API_PORT:-8000}\" \
     --host \"${SIMBUS_API_HOST:-0.0.0.0}\" \
-    --tick \"${SIMBUS_TICK_INTERVAL:-1.0}\"; \
+    --tick \"${SIMBUS_TICK_INTERVAL:-1.0}\" \
+    ${PORT_ARG}; \
 else \
   exec simbus \
     --type \"${SIMBUS_DEVICE_TYPE:-generic-tnh-sensor}\" \
-    --port \"${SIMBUS_MODBUS_PORT:-5020}\" \
     --api-port \"${SIMBUS_API_PORT:-8000}\" \
     --host \"${SIMBUS_API_HOST:-0.0.0.0}\" \
-    --tick \"${SIMBUS_TICK_INTERVAL:-1.0}\"; \
+    --tick \"${SIMBUS_TICK_INTERVAL:-1.0}\" \
+    ${PORT_ARG}; \
 fi"]

@@ -40,9 +40,9 @@ description: >
   Configured for cold aisle monitoring at ASHRAE A2 target conditions.
 
 modbus:
-  # Real TH2E factory default is port 512, but ports < 1024 require root on Linux.
-  # Map to 5512 for container use (set SIMBUS_MODBUS_PORT=512 only if running as root).
-  default_port: 5512
+  # Real TH2E factory default is port 512.
+  # In Docker, map a high host port (for example 5512) to container port 512.
+  default_port: 512
   unit_id: 1
   endianness: big
 
