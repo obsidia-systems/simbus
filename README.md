@@ -63,6 +63,7 @@ static, hard to script, or impossible to containerize. **simbus** was built to f
 - [Connecting to Ignition](#connecting-to-ignition)
 - [Device YAML Schema](#device-yaml-schema)
 - [Configuration](#configuration)
+- [Logging](#logging)
 - [Docker](#docker)
 - [Development](#development)
 - [Roadmap](#roadmap)
@@ -464,6 +465,7 @@ All settings use the `SIMBUS_` prefix and can be set via environment variables o
 | `SIMBUS_MODBUS_PORT` | `5020` | Modbus TCP listen port |
 | `SIMBUS_API_PORT` | `8000` | REST API listen port |
 | `SIMBUS_TICK_INTERVAL` | `1.0` | Simulation tick in seconds |
+| `SIMBUS_TICK_HEALTH_LOG_INTERVAL` | `60.0` | Periodic simulation loop health log interval in seconds |
 | `SIMBUS_SEED` | — | RNG seed for reproducible output |
 | `SIMBUS_DEVICE_NAME` | — | Override the device name from YAML |
 | `SIMBUS_CORS_ORIGINS` | `["*"]` | Allowed CORS origins for the REST API |
@@ -475,8 +477,48 @@ SIMBUS_DEVICE_TYPE=generic-ups
 SIMBUS_MODBUS_PORT=5021
 SIMBUS_API_PORT=8001
 SIMBUS_TICK_INTERVAL=1.0
+SIMBUS_TICK_HEALTH_LOG_INTERVAL=60.0
 SIMBUS_CORS_ORIGINS=["http://localhost:5173"]
 ```
+
+---
+
+## Logging
+
+simbus prioritizes **functional logs** over generic access logs. The goal is to show
+what changed in the simulation and why, not just that a request happened.
+
+Typical events include:
+
+- `simbus started`
+- `api listening`
+- `modbus server listening`
+- `register changed`
+- `simulation base changed`
+- `fault injected`
+- `fault expired`
+- `faults cleared`
+- `simulation reset`
+- `alarm activated` / `alarm cleared`
+- `simulation tick health`
+
+`simulation tick health` is emitted periodically and includes:
+
+- `tick_interval`
+- `tick_duration_ms`
+- `loop_drift_ms`
+- `sse_subscribers`
+- `active_faults`
+- `uptime_s`
+
+Tune its frequency with:
+
+```bash
+SIMBUS_TICK_HEALTH_LOG_INTERVAL=10
+```
+
+The runtime suppresses default Uvicorn access logs and noisy `pymodbus` protocol
+dumps so container output stays focused on simulation activity and control events.
 
 ---
 
@@ -505,7 +547,8 @@ docker compose up tnh-sensor ups crac    # handpick devices
 ```
 
 The image is a two-stage build (`python:3.14-slim` + uv), runs as a non-root user, and includes
-a healthcheck that polls `GET /status` every 15 seconds.
+a healthcheck that polls `GET /status` every 15 seconds. Containers start through the
+`simbus` CLI so Docker behavior matches local runs and uses the same logging setup.
 
 ---
 
@@ -522,7 +565,7 @@ uv sync
 ### Run tests
 
 ```bash
-uv run pytest                                 # 126 tests
+uv run pytest                                 # 134 tests
 uv run pytest -v tests/test_api.py            # single module
 uv run pytest --cov=simbus --cov-report=html  # coverage report
 ```
@@ -531,8 +574,8 @@ uv run pytest --cov=simbus --cov-report=html  # coverage report
 
 ```bash
 fastapi dev simbus/api/main.py                      # default device, hot-reload
-simbus start --type generic-ups --port 5021 --api-port 8001
-simbus start --file ./my-device.yaml --port 5030 --api-port 8030
+simbus --type generic-ups --port 5021 --api-port 8001
+simbus --file ./my-device.yaml --port 5030 --api-port 8030
 ```
 
 ### Project structure
@@ -558,8 +601,9 @@ simbus/
 │   │   ├── engine.py          # Async tick loop, behavior dispatch, alarms
 │   │   ├── behaviors.py       # Pure behavior functions
 │   │   └── faults.py          # Fault types and ActiveFault dataclass
+│   ├── logging_config.py      # structlog + stdlib logging configuration
 │   ├── settings.py            # pydantic-settings with SIMBUS_ prefix
-│   └── cli.py                 # Typer CLI — `simbus start`
+│   └── cli.py                 # Typer CLI — `simbus`
 └── tests/
     ├── test_config.py             # Schema validation + YAML loader (20 tests)
     ├── test_behaviors.py          # Pure behavior functions (30 tests)
@@ -596,7 +640,7 @@ timeline
                : REST API + SSE stream
                : Fault injection
                : Docker multi-stage
-               : 126 passing tests
+               : 134 passing tests
     v0.2 — Scenarios : Scenario playback system
                      : Pre-defined event sequences (YAML)
                      : CLI scenario player
