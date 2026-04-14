@@ -1,0 +1,162 @@
+# Builds a multi-arch Docker image (linux/amd64 + linux/arm64) and pushes it
+# to GitHub Container Registry (ghcr.io).
+#
+# Strategy: native matrix build — each architecture builds on its own runner,
+# then a merge job assembles the multi-arch manifest.  No QEMU emulation.
+#
+# Runners used:
+#   linux/amd64 → ubuntu-24.04       (standard GitHub-hosted x86-64)
+#   linux/arm64 → ubuntu-24.04-arm   (GitHub-hosted Graviton / Apple M equivalent)
+#
+# Triggers:
+#   tag v* from main  → :1.2.3, :1.2, :latest, :sha-<short>
+#   pull request      → build-only validation, no push
+#
+# Tags pushed from any branch other than main are rejected (job-level condition).
+# latest always points to the most recently published version tag.
+
+name: Build and publish Docker image
+
+on:
+  push:
+    tags: ["v*"]
+  pull_request:
+    branches: [main]
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  # ── Job 1/3 & 2/3 — build each architecture natively ────────────────────────
+  build:
+    name: Build (${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
+    permissions:
+      contents: read
+      packages: write
+
+    # On tag pushes: only proceed if the tag was created from main.
+    # On pull requests: always build (validation only, no push).
+    if: >-
+      github.event_name == 'pull_request' ||
+      github.event.base_ref == 'refs/heads/main'
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            platform: linux/amd64
+            runner: ubuntu-24.04
+          - arch: arm64
+            platform: linux/arm64
+            runner: ubuntu-24.04-arm
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Build and push by digest only (no tag yet — the merge job handles tags).
+      # On pull requests: build and validate only, no push.
+      - name: Build and push by digest
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: ${{ matrix.platform }}
+          outputs: >-
+            ${{ github.event_name != 'pull_request'
+              && format('type=image,name={0}/{1},push-by-digest=true,name-canonical=true,push=true', env.REGISTRY, env.IMAGE_NAME)
+              || 'type=cacheonly' }}
+          # Cache scoped per arch so the two matrix jobs don't interfere.
+          cache-from: type=gha,scope=build-${{ matrix.arch }}
+          cache-to: type=gha,mode=max,scope=build-${{ matrix.arch }}
+
+      # Pass the content-addressable digest to the merge job via artifact.
+      - name: Export digest
+        if: github.event_name != 'pull_request'
+        run: |
+          mkdir -p /tmp/digests
+          digest="${{ steps.build.outputs.digest }}"
+          touch "/tmp/digests/${digest#sha256:}"
+
+      - name: Upload digest artifact
+        if: github.event_name != 'pull_request'
+        uses: actions/upload-artifact@v4
+        with:
+          name: digest-${{ matrix.arch }}
+          path: /tmp/digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+  # ── Job 3/3 — assemble multi-arch manifest and apply tags ───────────────────
+  merge:
+    name: Merge manifests and push tags
+    runs-on: ubuntu-latest
+    needs: build
+    if: >-
+      github.event_name != 'pull_request' &&
+      github.event.base_ref == 'refs/heads/main'
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Download digests
+        uses: actions/download-artifact@v4
+        with:
+          path: /tmp/digests
+          pattern: digest-*
+          merge-multiple: true
+
+      # Tags generated from a vX.Y.Z push:
+      #   :1.2.3       exact version
+      #   :1.2         major.minor (floats to latest patch)
+      #   :latest      always updated to the newest published tag
+      #   :sha-abc1234 immutable reference to this exact commit
+      - name: Generate image tags
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=raw,value=latest
+            type=sha,prefix=sha-,format=short
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Combine both arch digests into a single manifest list with all tags.
+      - name: Create and push manifest list
+        working-directory: /tmp/digests
+        run: |
+          docker buildx imagetools create \
+            $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON") \
+            $(printf '${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@sha256:%s ' *)
+
+      # Confirm both architectures appear in the final manifest.
+      - name: Inspect final manifest
+        run: |
+          docker buildx imagetools inspect \
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.meta.outputs.version }}
