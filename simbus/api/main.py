@@ -25,6 +25,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from simbus.config.loader import load_builtin, load_from_file
 from simbus.core.modbus_server import ModbusServerInstance
 from simbus.core.store import RegisterStore
+from simbus.logging_config import configure_logging
 from simbus.settings import DeviceSettings
 from simbus.simulation.engine import SimulationEngine
 
@@ -56,11 +57,13 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         config=cfg,
         seed=settings.seed,
         tick_interval=settings.tick_interval,
+        tick_health_log_interval=settings.tick_health_log_interval,
     )
+    effective_modbus_port = settings.modbus_port or cfg.modbus.default_port
 
     server = ModbusServerInstance(
         store=store,
-        port=settings.modbus_port,
+        port=effective_modbus_port,
         unit_id=cfg.modbus.unit_id,
         on_holding_write=engine.update_base,
     )
@@ -71,7 +74,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     app.state.server = server
 
     # --- Start tasks ---
-    server_task = asyncio.create_task(server.serve_forever(), name="modbus-server")
+    server_task = asyncio.create_task(
+        server.serve_forever(), name="modbus-server")
     engine_task = asyncio.create_task(
         engine.run(),
         name="simulation-engine",
@@ -81,8 +85,14 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         "simbus started",
         device=cfg.name,
         type=cfg.type,
-        modbus_port=settings.modbus_port,
+        api_port=settings.api_port,
+        modbus_port=effective_modbus_port,
         tick_interval=settings.tick_interval,
+    )
+    logger.info(
+        "api listening",
+        host=settings.api_host,
+        port=settings.api_port,
     )
 
     yield
@@ -108,6 +118,8 @@ def create_app(settings: DeviceSettings | None = None) -> FastAPI:
     """
     from simbus.api.routers import registers, simulation, status
 
+    configure_logging()
+
     _app = FastAPI(
         title="simbus",
         version="0.0.1",
@@ -127,7 +139,8 @@ def create_app(settings: DeviceSettings | None = None) -> FastAPI:
     )
 
     _app.include_router(status.router, tags=["status"])
-    _app.include_router(registers.router, prefix="/registers", tags=["registers"])
+    _app.include_router(
+        registers.router, prefix="/registers", tags=["registers"])
     _app.include_router(simulation.router, tags=["simulation"])
 
     return _app

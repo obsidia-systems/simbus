@@ -7,7 +7,7 @@ description: >
   environmental monitoring in hot/cold aisles.
 
 modbus:
-  default_port: 5020
+  default_port: 502
   unit_id: 1
   endianness: big
 

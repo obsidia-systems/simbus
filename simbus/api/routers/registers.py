@@ -26,13 +26,16 @@ from __future__ import annotations
 import asyncio
 from typing import AsyncGenerator
 
+import structlog
 from fastapi import APIRouter, HTTPException, Request, status
 from fastapi.responses import StreamingResponse
 
 from simbus.api.schemas import CoilOverrideRequest, ErrorResponse, RegisterOverrideRequest, RegisterSnapshotResponse
+from simbus.simulation import behaviors
 from simbus.simulation.behaviors import scale_to_raw
 
 router = APIRouter()
+logger = structlog.get_logger(__name__)
 
 
 def _to_raw(body: RegisterOverrideRequest, scale: int) -> int:
@@ -88,9 +91,21 @@ async def override_register(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Holding register {address} not found on this device",
         )
+    old_raw = store.get_holding(address)
     raw = _to_raw(body, reg.scale)
     store.set_holding(address, raw)
-    request.app.state.engine.update_base(address, raw)
+    request.app.state.engine.update_base(address, raw, source="api")
+    logger.info(
+        "register changed",
+        source="api",
+        register_type="holding",
+        address=address,
+        register_name=reg.name,
+        old_raw=old_raw,
+        new_raw=raw,
+        old_real=behaviors.raw_to_scaled(old_raw, reg.scale),
+        new_real=behaviors.raw_to_scaled(raw, reg.scale),
+    )
     return {"address": address, "raw_value": raw, "real_value": raw / reg.scale}
 
 
@@ -118,9 +133,21 @@ async def override_input_register(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Input register {address} not found on this device",
         )
+    old_raw = store.get_input(address)
     raw = _to_raw(body, reg.scale)
     store.set_input(address, raw)
-    request.app.state.engine.update_base(address, raw)
+    request.app.state.engine.update_base(address, raw, source="api")
+    logger.info(
+        "register changed",
+        source="api",
+        register_type="input",
+        address=address,
+        register_name=reg.name,
+        old_raw=old_raw,
+        new_raw=raw,
+        old_real=behaviors.raw_to_scaled(old_raw, reg.scale),
+        new_real=behaviors.raw_to_scaled(raw, reg.scale),
+    )
     return {"address": address, "raw_value": raw, "real_value": raw / reg.scale}
 
 
@@ -146,7 +173,15 @@ async def override_coil(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Coil {address} not found on this device",
         )
+    old_value = store.get_coil(address)
     store.set_coil(address, body.value)
+    logger.info(
+        "coil changed",
+        source="api",
+        address=address,
+        old_value=old_value,
+        new_value=body.value,
+    )
     return {"address": address, "value": body.value}
 
 
@@ -172,7 +207,15 @@ async def override_discrete(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Discrete input {address} not found on this device",
         )
+    old_value = store.get_discrete(address)
     store.set_discrete(address, body.value)
+    logger.info(
+        "discrete changed",
+        source="api",
+        address=address,
+        old_value=old_value,
+        new_value=body.value,
+    )
     return {"address": address, "value": body.value}
 
 

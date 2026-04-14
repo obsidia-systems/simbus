@@ -1,8 +1,8 @@
 """CLI entrypoint — `simbus` command.
 
-Each subcommand starts a single device instance:
-  simbus start --type generic-tnh-sensor --port 5020 --name hot-aisle-01
-  simbus start --file ./my-ups.yaml --port 5021
+Each invocation starts a single device instance:
+  simbus --type generic-tnh-sensor --port 502 --name hot-aisle-01
+  simbus --file ./my-ups.yaml --port 512
 
 The CLI:
   1. Builds a DeviceSettings object from the given flags.
@@ -39,7 +39,7 @@ def start(
         "-f",
         help="Path to a custom device YAML file",
     ),
-    port: int = typer.Option(5020, "--port", "-p", help="Modbus TCP port"),
+    port: Optional[int] = typer.Option(None, "--port", "-p", help="Modbus TCP port"),  # noqa: UP007
     name: Optional[str] = typer.Option(None, "--name", "-n", help="Override device name"),  # noqa: UP007
     api_port: int = typer.Option(8000, "--api-port", help="REST API port"),
     host: str = typer.Option("0.0.0.0", "--host", help="Bind address"),  # noqa: S104
@@ -68,6 +68,13 @@ def start(
 
     fastapi_app = create_app(settings=settings)
 
+    modbus_port_display = port if port is not None else "yaml/default"
     typer.echo(
-        f"Starting '{name or device_type or file}' — Modbus :{port}  API :{api_port}")
-    uvicorn.run(fastapi_app, host=host, port=api_port, log_level="info")
+        f"Starting '{name or device_type or file}' — Modbus :{modbus_port_display}  API :{api_port}")
+    uvicorn.run(
+        fastapi_app,
+        host=host,
+        port=api_port,
+        log_level="warning",
+        access_log=False,
+    )

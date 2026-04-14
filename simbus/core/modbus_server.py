@@ -77,9 +77,17 @@ class _HoldingBlock(BaseModbusDataBlock):
         for i, v in enumerate(values):
             addr = base + i
             raw = int(v)
+            old_raw = self._store.get_holding(addr)
             self._store.set_holding(addr, raw)
             if self._on_write is not None:
-                self._on_write(addr, raw)
+                self._on_write(addr, raw, source="modbus")
+            logger.info(
+                "modbus holding write",
+                source="modbus",
+                address=addr,
+                old_raw=old_raw,
+                new_raw=raw,
+            )
 
     def reset(self) -> None:
         pass
@@ -123,7 +131,17 @@ class _CoilBlock(BaseModbusDataBlock):
     def setValues(self, address: int, values: list[bool]) -> None:
         base = _addr(address)
         for i, v in enumerate(values):
-            self._store.set_coil(base + i, bool(v))
+            addr = base + i
+            new_value = bool(v)
+            old_value = self._store.get_coil(addr)
+            self._store.set_coil(addr, new_value)
+            logger.info(
+                "modbus coil write",
+                source="modbus",
+                address=addr,
+                old_value=old_value,
+                new_value=new_value,
+            )
 
     def reset(self) -> None:
         pass

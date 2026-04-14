@@ -9,6 +9,20 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Added
 
+- Functional logging for simulation/runtime events:
+  - `simbus started`
+  - `api listening`
+  - `modbus server listening`
+  - `register changed`
+  - `simulation base changed`
+  - `fault injected`
+  - `fault expired`
+  - `faults cleared`
+  - `simulation reset`
+  - `alarm activated` / `alarm cleared`
+- Periodic `simulation tick health` logs with `tick_interval`, `tick_duration_ms`,
+  `loop_drift_ms`, `sse_subscribers`, `active_faults`, and `uptime_s`.
+- `SIMBUS_TICK_HEALTH_LOG_INTERVAL` setting to control periodic engine health logging.
 - `PATCH /registers/input/{address}` — write to an input register from the REST API.
   Input registers are read-only for Modbus clients (FC4), but the simulation control API
   can override them directly. Updates `state.base` so the simulation continues from the
@@ -62,6 +76,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Changed
 
+- Docker runtime now starts through the `simbus` CLI instead of invoking `uvicorn`
+  directly. This keeps container startup behavior and logging aligned with local runs.
+- Default Uvicorn access logs and noisy `pymodbus` protocol debug output are suppressed
+  so runtime logs stay focused on simulation activity and state transitions.
 - License changed from Elastic License 2.0 (ELv2) to **MIT**.
 - `ModbusServerInstance.__init__` accepts a new optional `on_holding_write` callback
   (signature `(address: int, raw_value: int) -> None`). Pass `engine.update_base` to

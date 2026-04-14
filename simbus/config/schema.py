@@ -188,7 +188,7 @@ class RegisterMapConfig(BaseModel):
 
 class ModbusConfig(BaseModel):
     """Configuration for the Modbus server, including communication parameters and defaults."""
-    default_port: int = Field(ge=1024, le=65535)
+    default_port: int = Field(ge=1, le=65535)
     unit_id: int = Field(default=1, ge=1, le=247)
     endianness: Endianness = Endianness.BIG
 

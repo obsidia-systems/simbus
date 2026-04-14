@@ -51,7 +51,7 @@ class TestDeviceConfig:
     def test_invalid_port_too_low(self) -> None:
         with pytest.raises(ValidationError):
             DeviceConfig.model_validate(
-                _minimal_device(modbus={"default_port": 80, "unit_id": 1})
+                _minimal_device(modbus={"default_port": 0, "unit_id": 1})
             )
 
     def test_trigger_references_unknown_register(self) -> None:

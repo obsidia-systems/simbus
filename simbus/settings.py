@@ -36,13 +36,18 @@ class DeviceSettings(BaseSettings):
     )
 
     # Network
-    modbus_port: int = Field(default=5020, ge=1024, le=65535)
+    modbus_port: int | None = Field(default=None, ge=1, le=65535)
     api_host: str = Field(default="0.0.0.0")  # noqa: S104
     api_port: int = Field(default=8000, ge=1024, le=65535)
 
     # Simulation
     tick_interval: float = Field(
         default=1.0, gt=0, description="Tick interval in seconds")
+    tick_health_log_interval: float = Field(
+        default=60.0,
+        gt=0,
+        description="How often to emit simulation tick health logs, in seconds.",
+    )
     seed: int | None = Field(
         default=None, description="RNG seed for reproducible behavior")
 

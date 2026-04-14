@@ -8,7 +8,7 @@ description: >
   in physical security and BMS integrations.
 
 modbus:
-  default_port: 5026
+  default_port: 502
   unit_id: 1
   endianness: big
 

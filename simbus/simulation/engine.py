@@ -13,9 +13,11 @@ from __future__ import annotations
 
 import asyncio
 import json
+import time
 from dataclasses import dataclass
 from random import Random
 
+import structlog
 from simbus.config.schema import (
     ConstantBehavior,
     DeviceConfig,
@@ -29,6 +31,8 @@ from simbus.config.schema import (
 from simbus.core.store import RegisterStore
 from simbus.simulation import behaviors
 from simbus.simulation.faults import ActiveFault, FaultType
+
+logger = structlog.get_logger(__name__)
 
 
 @dataclass
@@ -48,6 +52,7 @@ class SimulationEngine:
         config: DeviceConfig,
         seed: int | None = None,
         tick_interval: float = 1.0,
+        tick_health_log_interval: float = 60.0,
     ) -> None:
         self._store = store
         self._config = config
@@ -56,6 +61,7 @@ class SimulationEngine:
 
         # Mutable — updated live via PATCH /simulation
         self.tick_interval: float = tick_interval
+        self.tick_health_log_interval: float = tick_health_log_interval
 
         # Per-register simulation state keyed by address
         self._state: dict[int, _RegState] = {
@@ -69,6 +75,9 @@ class SimulationEngine:
         # SSE subscriber queues — populated by the API layer
         self.sse_queues: list[asyncio.Queue[str]] = []
 
+        self._started_monotonic: float | None = None
+        self._next_health_log_at: float | None = None
+
     # -----------------------------------------------------------------------
     # Public API
     # -----------------------------------------------------------------------
@@ -80,10 +89,21 @@ class SimulationEngine:
         via PATCH /simulation take effect without restarting the engine.
         """
         self._running = True
+        self._started_monotonic = time.monotonic()
+        self._next_health_log_at = self._started_monotonic + self.tick_health_log_interval
         while self._running:
             dt = self.tick_interval
+            tick_started = time.monotonic()
             self._tick(dt)
             self._publish_snapshot()
+            tick_finished = time.monotonic()
+            tick_duration_ms = (tick_finished - tick_started) * 1000.0
+            loop_drift_ms = max(0.0, (tick_finished - tick_started - dt) * 1000.0)
+            self._log_tick_health_if_due(
+                now=tick_finished,
+                tick_duration_ms=tick_duration_ms,
+                loop_drift_ms=loop_drift_ms,
+            )
             await asyncio.sleep(dt)
 
     def stop(self) -> None:
@@ -110,7 +130,7 @@ class SimulationEngine:
             self._state[reg.address].base = reg.default
             self._state[reg.address].elapsed_s = 0.0
 
-    def update_base(self, address: int, raw_value: int) -> None:
+    def update_base(self, address: int, raw_value: int, source: str = "unknown") -> None:
         """Update simulation base for a holding or input register from a raw store value.
 
         Converts raw → real using the register's scale so the simulation
@@ -131,7 +151,17 @@ class SimulationEngine:
             None,
         )
         if reg is not None and address in self._state:
-            self._state[address].base = raw_value / reg.scale
+            old_base = self._state[address].base
+            new_base = raw_value / reg.scale
+            self._state[address].base = new_base
+            logger.info(
+                "simulation base changed",
+                source=source,
+                address=address,
+                register_name=reg.name,
+                old_base=old_base,
+                new_base=new_base,
+            )
 
     def tick_faults(self, dt: float) -> None:
         """Decrement fault timers; remove expired faults."""
@@ -140,7 +170,14 @@ class SimulationEngine:
         expired = [key for key, f in self._faults.items()
                    if f.remaining_s <= 0]
         for key in expired:
+            fault = self._faults[key]
             del self._faults[key]
+            logger.info(
+                "fault expired",
+                source="simulation",
+                fault_type=fault.fault_type,
+                register_name=fault.register_name,
+            )
 
     # -----------------------------------------------------------------------
     # Internal tick
@@ -257,7 +294,15 @@ class SimulationEngine:
             # alarm fault targeting this coil by name takes priority over trigger logic
             alarm_fault = self._faults.get(coil.name)
             if alarm_fault and alarm_fault.fault_type == FaultType.alarm:
+                previous = self._store.get_coil(coil.address)
                 self._store.set_coil(coil.address, True)
+                if not previous:
+                    logger.info(
+                        "alarm activated",
+                        source="fault",
+                        alarm_name=coil.name,
+                        trigger_type="forced_alarm_fault",
+                    )
                 continue
 
             if coil.trigger is None:
@@ -275,7 +320,18 @@ class SimulationEngine:
             triggered = _check_condition(
                 scaled, coil.trigger.condition, coil.trigger.threshold
             )
+            previous = self._store.get_coil(coil.address)
             self._store.set_coil(coil.address, triggered)
+            if previous != triggered:
+                logger.info(
+                    "alarm activated" if triggered else "alarm cleared",
+                    source="simulation",
+                    alarm_name=coil.name,
+                    source_register=coil.trigger.source_register,
+                    value=scaled,
+                    condition=coil.trigger.condition,
+                    threshold=coil.trigger.threshold,
+                )
 
         for disc in self._config.registers.discrete:
             if disc.trigger is None:
@@ -293,7 +349,21 @@ class SimulationEngine:
             triggered = _check_condition(
                 scaled, disc.trigger.condition, disc.trigger.threshold
             )
+            previous = self._store.get_discrete(disc.address)
             self._store.set_discrete(disc.address, triggered)
+            if previous != triggered:
+                logger.info(
+                    "discrete changed",
+                    source="simulation",
+                    address=disc.address,
+                    discrete_name=disc.name,
+                    old_value=previous,
+                    new_value=triggered,
+                    source_register=disc.trigger.source_register,
+                    value=scaled,
+                    condition=disc.trigger.condition,
+                    threshold=disc.trigger.threshold,
+                )
 
     def _publish_snapshot(self) -> None:
         """Push a JSON snapshot to all active SSE subscriber queues."""
@@ -313,6 +383,30 @@ class SimulationEngine:
         for q in self.sse_queues:
             if not q.full():
                 q.put_nowait(payload)
+
+    def _log_tick_health_if_due(
+        self,
+        now: float,
+        tick_duration_ms: float,
+        loop_drift_ms: float,
+    ) -> None:
+        """Emit a low-frequency health log for the simulation loop."""
+        if self._next_health_log_at is None or self._started_monotonic is None:
+            return
+        if now < self._next_health_log_at:
+            return
+
+        logger.info(
+            "simulation tick health",
+            source="simulation",
+            tick_interval=self.tick_interval,
+            tick_duration_ms=round(tick_duration_ms, 3),
+            loop_drift_ms=round(loop_drift_ms, 3),
+            sse_subscribers=len(self.sse_queues),
+            active_faults=len(self._faults),
+            uptime_s=round(now - self._started_monotonic, 3),
+        )
+        self._next_health_log_at = now + self.tick_health_log_interval
 
 
 # ---------------------------------------------------------------------------
