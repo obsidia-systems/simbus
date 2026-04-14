@@ -128,16 +128,40 @@ services:
     profiles: ["power", "all"]
 
   # -- Custom device example (uncomment to enable) --------------------------------
-  papouch-th2e:
+  papouch-th2e-01:
     <<: *simbus-defaults
-    container_name: simbus-papouch-th2e
+    container_name: simbus-papouch-th2e-01
     volumes:
     - ./devices:/app/devices:ro   # monta en tiempo de ejecución, sin rebuild
     environment:
       SIMBUS_YAML_PATH: "/app/devices/papouch-th2e.yaml"
-    ports:
-      - "5512:5512"
-      - "8012:8012"
+    profiles: ["custom", "all"]
+
+  papouch-th2e-02:
+    <<: *simbus-defaults
+    container_name: simbus-papouch-th2e-02
+    volumes:
+    - ./devices:/app/devices:ro   # monta en tiempo de ejecución, sin rebuild
+    environment:
+      SIMBUS_YAML_PATH: "/app/devices/papouch-th2e.yaml"
+    profiles: ["custom", "all"]
+
+  papouch-th2e-03:
+    <<: *simbus-defaults
+    container_name: simbus-papouch-th2e-03
+    volumes:
+    - ./devices:/app/devices:ro   # monta en tiempo de ejecución, sin rebuild
+    environment:
+      SIMBUS_YAML_PATH: "/app/devices/papouch-th2e.yaml"
+    profiles: ["custom", "all"]
+
+  papouch-th2e-04:
+    <<: *simbus-defaults
+    container_name: simbus-papouch-th2e-04
+    volumes:
+    - ./devices:/app/devices:ro   # monta en tiempo de ejecución, sin rebuild
+    environment:
+      SIMBUS_YAML_PATH: "/app/devices/papouch-th2e.yaml"
     profiles: ["custom", "all"]
 
 networks:

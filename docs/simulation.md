@@ -44,7 +44,7 @@ The `SimulationEngine` runs as a single asyncio Task. On every **tick** it:
 7. Evaluates all coil and discrete-input triggers against current register values.
 8. Publishes a JSON snapshot to every active SSE subscriber.
 
-```
+```text
 tick
  ├─ tick_faults(dt)           — expire TTL faults
  ├─ _tick_registers(holding)  — compute + fault + write to holding store
@@ -90,7 +90,7 @@ the raw integer back to a real-world value (`raw / scale`) and stores it as the 
 `state.base`. On the next tick, the behavior runs from the new operating point — it
 doesn't snap back to the YAML default.
 
-```
+```text
 YAML default: temperature = 22.5°C  →  state.base = 22.5
 gaussian_noise oscillates around 22.5°C
 
@@ -134,6 +134,7 @@ when explicitly written.
 **Parameters:** none.
 
 **Use cases:**
+
 - Setpoint registers that operators write to
 - Mode or status registers that change only on command
 - Reference values in multi-register devices
@@ -163,12 +164,14 @@ output oscillates around the base value — most samples fall within ±1 std\_de
 | `drift` | object | no | Optional drift modifier (see [Drift Modifier](#drift-modifier)) |
 
 **How to choose `std_dev`:**
+
 - Precision sensor (±0.1°C): `std_dev: 0.05`
 - Typical HVAC sensor (±0.5°C): `std_dev: 0.3`
 - Noisy current sensor (±2%): `std_dev: 1.0`
 - Intentionally unstable / degraded sensor: `std_dev: 5.0`
 
 **Use cases:**
+
 - Temperature, humidity, pressure, current, voltage sensors
 - Any value that should appear "live" without a defined pattern
 
@@ -201,7 +204,7 @@ output oscillates around the base value — most samples fall within ±1 std\_de
 Produces a sine wave oscillation around `state.base`. The value cycles between
 `base - amplitude` and `base + amplitude` over the configured period.
 
-```
+```text
 value = state.base + amplitude × sin(2π × elapsed_s / period_s)
 ```
 
@@ -250,6 +253,7 @@ At `SIMBUS_TICK_INTERVAL=60.0`, each real second = one simulation minute.
 A `period_hours: 24` cycle completes in 24 real minutes instead of 24 hours.
 
 **Use cases:**
+
 - Daily temperature/humidity cycles in data centers or facilities
 - Periodic load patterns on UPS and PDUs
 - HVAC return air temperature variation
@@ -314,6 +318,7 @@ cycles, inject a fault or use `PATCH /registers` to reposition the base.
 ```
 
 **Use cases:**
+
 - Battery state of charge / discharge
 - Runtime remaining counters
 - Slow sensor aging or baseline creep
@@ -327,7 +332,7 @@ Linearly ramps from `min` to `max` over `period_seconds`, then immediately reset
 `min` and repeats. The shape is a rising ramp, not a triangle — there is no descending
 slope.
 
-```
+```text
 value = min + (max - min) × (elapsed_s % period_s) / period_s
 ```
 
@@ -351,6 +356,7 @@ value = min + (max - min) × (elapsed_s % period_s) / period_s
 | `max` | float | yes | Peak value. Must be > `min` |
 
 **Use cases:**
+
 - Compressor or pump cycle simulation
 - Load ramp tests — verify alarm response at specific thresholds
 - Coolant pressure cycles
@@ -405,6 +411,7 @@ Steps are evaluated in ascending `at` order. If multiple steps share the same `a
 the last one in the list wins.
 
 **Use cases:**
+
 - Mode registers that change during a test scenario
 - Simulating a device startup sequence
 - Discrete state machines (standby → active → fault → reset)
@@ -570,8 +577,7 @@ curl -X POST http://localhost:8000/faults \
 
 **Fields:**
 
-| Field | Type | Description |
-| --- | --- | --- |
+| Field | Type | Description || --- | --- | --- |
 | `fault_type` | string | One of: `spike`, `freeze`, `dropout`, `noise_amplify`, `alarm` |
 | `register_name` | string \| null | Name of the target register or coil. `null` applies to all registers (`dropout` device-wide) |
 | `value` | float \| null | Fault parameter. Meaning depends on type (see below) |
@@ -612,6 +618,7 @@ curl -X POST http://localhost:8000/faults \
 | `value` | Target real-world value (before scale) |
 
 **Use cases:**
+
 - Trigger a specific alarm to test downstream SCADA logic
 - Push a value to an exact threshold to verify alarm hysteresis
 - Simulate a sensor producing a reading beyond its physical range
@@ -641,6 +648,7 @@ curl -X POST http://localhost:8000/faults \
 | `value` | Not used — pass `null` |
 
 **Use cases:**
+
 - Simulate a stuck sensor (common failure mode)
 - Test that SCADA detects stale / non-changing values
 - Hold a value constant while testing other parts of the system
@@ -678,6 +686,7 @@ curl -X POST http://localhost:8000/faults \
 | `value` | Not used — pass `null` |
 
 **Use cases:**
+
 - Test SCADA handling of communication loss
 - Verify that `0` values don't incorrectly trigger alarms (e.g., temperature reads 0°C)
 - Test watchdog and timeout logic in polling clients
@@ -709,12 +718,14 @@ curl -X POST http://localhost:8000/faults \
 | `value` | Multiplier for the noise standard deviation. `10.0` = 10× noisier |
 
 **Choosing the multiplier:**
+
 - `2.0` — slightly degraded sensor (barely noticeable)
 - `5.0` — clearly unstable sensor, occasional outliers
 - `20.0` — severely degraded, highly erratic readings
 - `100.0` — extreme noise, values essentially random within register range
 
 **Use cases:**
+
 - Test SCADA alarm filtering and debounce logic
 - Simulate a sensor with a loose connection
 - Verify that noise filtering doesn't suppress real alarms
@@ -725,8 +736,9 @@ curl -X POST http://localhost:8000/faults \
 ### alarm
 
 Forces a named **coil** to `True` for the duration, bypassing the normal trigger
-evaluation. The holding register values are not affected — only the coil state is
-overridden. When the fault expires, the coil reverts to normal trigger-based evaluation.
+evaluation. The register values are not affected — only the coil state is overridden.
+When the fault expires the coil reverts to normal trigger-based evaluation on the
+next tick.
 
 ```bash
 # Force high_temp_alarm coil active for 45 seconds
@@ -746,14 +758,20 @@ curl -X POST http://localhost:8000/faults \
 | `value` | Not used — pass `null` |
 
 **Why this is different from `spike`:**
-- `spike` raises the register value above the trigger threshold, which causes the coil
-  to fire through normal evaluation. Use it when the test requires a realistic causal
+
+- `spike` raises the register value above the trigger threshold, causing the coil to
+  fire through normal evaluation. Use it when the test requires a realistic causal
   chain (sensor reads high → alarm fires).
-- `alarm` forces the coil directly without touching the register. Use it when you want
+- `alarm` forces the coil directly without touching any register. Use it when you want
   to test the downstream SCADA response to the alarm bit itself, independent of what
-  the sensor reads.
+  the sensor currently reads.
+
+> **Note:** `alarm` targets a coil by name — use the coil's `name` field from the
+> YAML, not the register name. If you pass a register name the fault is stored but
+> has no effect (no coil matches).
 
 **Use cases:**
+
 - Test SCADA alarm acknowledgement workflows
 - Verify alarm journal entries and notifications
 - Test alarm priority and suppression logic

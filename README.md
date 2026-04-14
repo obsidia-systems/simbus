@@ -272,17 +272,24 @@ Interactive docs at **`http://localhost:8000/docs`** (Swagger UI).
 | Method | Endpoint | Description |
 | --- | --- | --- |
 | `GET` | `/registers` | Snapshot of all current raw register values |
-| `PATCH` | `/registers/{address}` | Shift operating point — simulation continues from new value |
+| `PATCH` | `/registers/{address}` | Holding — shift operating point, simulation continues from new value |
+| `PATCH` | `/registers/input/{address}` | Input — same as above (read-only for Modbus clients, writable via API) |
+| `PATCH` | `/registers/coils/{address}` | Coil — set boolean state |
+| `PATCH` | `/registers/discrete/{address}` | Discrete input — set boolean state |
 | `GET` | `/registers/stream` | **SSE** — one JSON frame per tick, forever |
 
-**Shift temperature to 27°C:**
+Numeric PATCH endpoints accept either a **raw** integer or a **real-world** float — the API applies the register's scale automatically:
 
 ```bash
+# Real-world value — most ergonomic
 curl -X PATCH http://localhost:8000/registers/0 \
-  -H "Content-Type: application/json" \
+  -d '{"real_value": 27.0}'
+# → {"address": 0, "raw_value": 270, "real_value": 27.0}
+
+# Raw uint16 — matches Modbus wire format (scale must be known)
+curl -X PATCH http://localhost:8000/registers/0 \
   -d '{"value": 270}'
-# raw 270 = 27.0°C (scale 10)
-# gaussian_noise now oscillates around 27.0°C
+# → {"address": 0, "raw_value": 270, "real_value": 27.0}
 ```
 
 **Subscribe to the live stream:**
