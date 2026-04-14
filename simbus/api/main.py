@@ -25,6 +25,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from simbus.config.loader import load_builtin, load_from_file
 from simbus.core.modbus_server import ModbusServerInstance
 from simbus.core.store import RegisterStore
+from simbus.logging_config import configure_logging
 from simbus.settings import DeviceSettings
 from simbus.simulation.engine import SimulationEngine
 
@@ -107,6 +108,8 @@ def create_app(settings: DeviceSettings | None = None) -> FastAPI:
                   If None, settings are read from env vars at startup.
     """
     from simbus.api.routers import registers, simulation, status
+
+    configure_logging()
 
     _app = FastAPI(
         title="simbus",

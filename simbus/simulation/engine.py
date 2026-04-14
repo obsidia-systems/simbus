@@ -16,6 +16,7 @@ import json
 from dataclasses import dataclass
 from random import Random
 
+import structlog
 from simbus.config.schema import (
     ConstantBehavior,
     DeviceConfig,
@@ -29,6 +30,8 @@ from simbus.config.schema import (
 from simbus.core.store import RegisterStore
 from simbus.simulation import behaviors
 from simbus.simulation.faults import ActiveFault, FaultType
+
+logger = structlog.get_logger(__name__)
 
 
 @dataclass
@@ -110,7 +113,7 @@ class SimulationEngine:
             self._state[reg.address].base = reg.default
             self._state[reg.address].elapsed_s = 0.0
 
-    def update_base(self, address: int, raw_value: int) -> None:
+    def update_base(self, address: int, raw_value: int, source: str = "unknown") -> None:
         """Update simulation base for a holding or input register from a raw store value.
 
         Converts raw → real using the register's scale so the simulation
@@ -131,7 +134,17 @@ class SimulationEngine:
             None,
         )
         if reg is not None and address in self._state:
-            self._state[address].base = raw_value / reg.scale
+            old_base = self._state[address].base
+            new_base = raw_value / reg.scale
+            self._state[address].base = new_base
+            logger.info(
+                "simulation base changed",
+                source=source,
+                address=address,
+                register_name=reg.name,
+                old_base=old_base,
+                new_base=new_base,
+            )
 
     def tick_faults(self, dt: float) -> None:
         """Decrement fault timers; remove expired faults."""
@@ -140,7 +153,14 @@ class SimulationEngine:
         expired = [key for key, f in self._faults.items()
                    if f.remaining_s <= 0]
         for key in expired:
+            fault = self._faults[key]
             del self._faults[key]
+            logger.info(
+                "fault expired",
+                source="simulation",
+                fault_type=fault.fault_type,
+                register_name=fault.register_name,
+            )
 
     # -----------------------------------------------------------------------
     # Internal tick
@@ -257,7 +277,15 @@ class SimulationEngine:
             # alarm fault targeting this coil by name takes priority over trigger logic
             alarm_fault = self._faults.get(coil.name)
             if alarm_fault and alarm_fault.fault_type == FaultType.alarm:
+                previous = self._store.get_coil(coil.address)
                 self._store.set_coil(coil.address, True)
+                if not previous:
+                    logger.info(
+                        "alarm activated",
+                        source="fault",
+                        alarm_name=coil.name,
+                        trigger_type="forced_alarm_fault",
+                    )
                 continue
 
             if coil.trigger is None:
@@ -275,7 +303,18 @@ class SimulationEngine:
             triggered = _check_condition(
                 scaled, coil.trigger.condition, coil.trigger.threshold
             )
+            previous = self._store.get_coil(coil.address)
             self._store.set_coil(coil.address, triggered)
+            if previous != triggered:
+                logger.info(
+                    "alarm activated" if triggered else "alarm cleared",
+                    source="simulation",
+                    alarm_name=coil.name,
+                    source_register=coil.trigger.source_register,
+                    value=scaled,
+                    condition=coil.trigger.condition,
+                    threshold=coil.trigger.threshold,
+                )
 
         for disc in self._config.registers.discrete:
             if disc.trigger is None:
@@ -293,7 +332,21 @@ class SimulationEngine:
             triggered = _check_condition(
                 scaled, disc.trigger.condition, disc.trigger.threshold
             )
+            previous = self._store.get_discrete(disc.address)
             self._store.set_discrete(disc.address, triggered)
+            if previous != triggered:
+                logger.info(
+                    "discrete changed",
+                    source="simulation",
+                    address=disc.address,
+                    discrete_name=disc.name,
+                    old_value=previous,
+                    new_value=triggered,
+                    source_register=disc.trigger.source_register,
+                    value=scaled,
+                    condition=disc.trigger.condition,
+                    threshold=disc.trigger.threshold,
+                )
 
     def _publish_snapshot(self) -> None:
         """Push a JSON snapshot to all active SSE subscriber queues."""

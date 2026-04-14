@@ -8,6 +8,7 @@ PATCH  /simulation          → update tick interval (live, no restart needed)
 
 from __future__ import annotations
 
+import structlog
 from fastapi import APIRouter, Request, status
 
 from simbus.api.schemas import (
@@ -18,6 +19,7 @@ from simbus.api.schemas import (
 from simbus.simulation.faults import ActiveFault, FaultType
 
 router = APIRouter()
+logger = structlog.get_logger(__name__)
 
 
 @router.post(
@@ -36,6 +38,14 @@ async def inject_fault(body: FaultRequest, request: Request) -> dict[str, str]:
         remaining_s=body.duration_s,
     )
     engine.inject_fault(fault)
+    logger.info(
+        "fault injected",
+        source="api",
+        fault_type=body.fault_type,
+        register_name=body.register_name,
+        value=body.value,
+        duration_s=body.duration_s,
+    )
     return {"status": "accepted", "fault_type": body.fault_type}
 
 
@@ -65,7 +75,9 @@ async def list_faults(request: Request) -> list[ActiveFaultResponse]:
     summary="Clear all active faults",
 )
 async def clear_faults(request: Request) -> None:
+    active_faults = len(request.app.state.engine._faults)
     request.app.state.engine.clear_faults()
+    logger.info("faults cleared", source="api", cleared_count=active_faults)
 
 
 @router.patch(
@@ -76,7 +88,14 @@ async def patch_simulation(body: SimulationPatchRequest, request: Request) -> di
     """Update simulation parameters. Changes take effect on the next tick without restarting."""
     engine = request.app.state.engine
     if body.tick_interval is not None:
+        old_tick_interval = engine.tick_interval
         engine.tick_interval = body.tick_interval
+        logger.info(
+            "simulation tick interval updated",
+            source="api",
+            old_tick_interval=old_tick_interval,
+            new_tick_interval=engine.tick_interval,
+        )
     return {"tick_interval": engine.tick_interval}
 
 
@@ -88,3 +107,4 @@ async def patch_simulation(body: SimulationPatchRequest, request: Request) -> di
 async def reset_simulation(request: Request) -> None:
     """Reset all registers to YAML defaults, clear faults, and rewind simulation time. Engine keeps running."""
     request.app.state.engine.reset()
+    logger.info("simulation reset", source="api")
