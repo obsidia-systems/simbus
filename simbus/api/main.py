@@ -73,7 +73,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     app.state.server = server
 
     # --- Start tasks ---
-    server_task = asyncio.create_task(server.serve_forever(), name="modbus-server")
+    server_task = asyncio.create_task(
+        server.serve_forever(), name="modbus-server")
     engine_task = asyncio.create_task(
         engine.run(),
         name="simulation-engine",
@@ -83,6 +84,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         "simbus started",
         device=cfg.name,
         type=cfg.type,
+        api_port=settings.api_port,
         modbus_port=settings.modbus_port,
         tick_interval=settings.tick_interval,
     )
@@ -90,7 +92,6 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         "api listening",
         host=settings.api_host,
         port=settings.api_port,
-        device=cfg.name,
     )
 
     yield
@@ -137,7 +138,8 @@ def create_app(settings: DeviceSettings | None = None) -> FastAPI:
     )
 
     _app.include_router(status.router, tags=["status"])
-    _app.include_router(registers.router, prefix="/registers", tags=["registers"])
+    _app.include_router(
+        registers.router, prefix="/registers", tags=["registers"])
     _app.include_router(simulation.router, tags=["simulation"])
 
     return _app
