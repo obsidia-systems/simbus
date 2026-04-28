@@ -63,8 +63,7 @@ class TestHoldingRegisters:
         store, _ = running_server
         result = await client.read_holding_registers(1, count=1, device_id=UNIT_ID)
         assert not result.isError()
-        assert result.registers[0] == store.get_holding(
-            1)  # 450 = 45.0%RH × 10
+        assert result.registers[0] == store.get_holding(1)  # 450 = 45.0%RH × 10
 
     async def test_read_multiple_registers(self, running_server, client):
         store, _ = running_server

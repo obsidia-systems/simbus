@@ -47,7 +47,7 @@ def _addr(address: int) -> int:
     return address - 1
 
 
-class _HoldingBlock(BaseModbusDataBlock):
+class _HoldingBlock(BaseModbusDataBlock):  # type: ignore[type-arg]
     """Holding registers (FC3 read / FC6, FC16 write).
 
     The optional `on_write` callback is invoked for each register written by a
@@ -56,13 +56,15 @@ class _HoldingBlock(BaseModbusDataBlock):
     simulation operating point — identical behaviour to PATCH /registers/{address}.
     """
 
+    _write_cb: Callable[[int, int, str], None] | None
+
     def __init__(
         self,
         store: RegisterStore,
-        on_write: Callable[[int, int], None] | None = None,
+        on_write: Callable[[int, int, str], None] | None = None,
     ) -> None:
         self._store = store
-        self._on_write = on_write
+        self._write_cb = on_write
 
     def validate(self, address: int, count: int = 1) -> bool:
         """Always accept the request and let the store handle out-of-range addresses."""
@@ -79,8 +81,8 @@ class _HoldingBlock(BaseModbusDataBlock):
             raw = int(v)
             old_raw = self._store.get_holding(addr)
             self._store.set_holding(addr, raw)
-            if self._on_write is not None:
-                self._on_write(addr, raw, source="modbus")
+            if self._write_cb is not None:
+                self._write_cb(addr, raw, source="modbus")  # type: ignore[call-arg]
             logger.info(
                 "modbus holding write",
                 source="modbus",
@@ -93,7 +95,7 @@ class _HoldingBlock(BaseModbusDataBlock):
         pass
 
 
-class _InputBlock(BaseModbusDataBlock):
+class _InputBlock(BaseModbusDataBlock):  # type: ignore[type-arg]
     """Input registers (FC4 read-only)."""
 
     def __init__(self, store: RegisterStore) -> None:
@@ -114,7 +116,7 @@ class _InputBlock(BaseModbusDataBlock):
         pass
 
 
-class _CoilBlock(BaseModbusDataBlock):
+class _CoilBlock(BaseModbusDataBlock):  # type: ignore[type-arg]
     """Coils (FC1 read / FC5, FC15 write)."""
 
     def __init__(self, store: RegisterStore) -> None:
@@ -147,7 +149,7 @@ class _CoilBlock(BaseModbusDataBlock):
         pass
 
 
-class _DiscreteBlock(BaseModbusDataBlock):
+class _DiscreteBlock(BaseModbusDataBlock):  # type: ignore[type-arg]
     """Discrete inputs (FC2 read-only)."""
 
     def __init__(self, store: RegisterStore) -> None:
@@ -189,7 +191,7 @@ class ModbusServerInstance:
         store: RegisterStore,
         port: int,
         unit_id: int,
-        on_holding_write: Callable[[int, int], None] | None = None,
+        on_holding_write: Callable[[int, int, str], None] | None = None,
     ) -> None:
         """
         Args:
@@ -215,7 +217,7 @@ class ModbusServerInstance:
             co=_CoilBlock(self._store),
             di=_DiscreteBlock(self._store),
         )
-        server_ctx = ModbusServerContext(devices=device_ctx, single=True)
+        server_ctx = ModbusServerContext(devices=device_ctx, single=True)  # type: ignore[no-untyped-call]
 
         self._server = ModbusTcpServer(
             context=server_ctx,
@@ -223,8 +225,7 @@ class ModbusServerInstance:
         )
 
         self._status = "listening"
-        logger.info("modbus server listening",
-                    port=self._port, unit_id=self._unit_id)
+        logger.info("modbus server listening", port=self._port, unit_id=self._unit_id)
         try:
             await self._server.serve_forever()
         except Exception:
@@ -236,7 +237,7 @@ class ModbusServerInstance:
     async def stop(self) -> None:
         """Shutdown the Modbus TCP server gracefully."""
         if self._server is not None:
-            await self._server.shutdown()
+            await self._server.shutdown()  # type: ignore[no-untyped-call]
             self._server = None
             self._status = "stopped"
             logger.info("modbus server stopped", port=self._port)

@@ -18,11 +18,13 @@ from dataclasses import dataclass
 from random import Random
 
 import structlog
+
 from simbus.config.schema import (
     ConstantBehavior,
     DeviceConfig,
     DriftBehavior,
     GaussianNoiseBehavior,
+    RegisterConfig,
     SawtoothBehavior,
     SinusoidalBehavior,
     StepBehavior,
@@ -39,8 +41,8 @@ logger = structlog.get_logger(__name__)
 class _RegState:
     """Mutable simulation state for a single register."""
 
-    base: float          # current mean/center value (shifts with drift)
-    elapsed_s: float = 0.0   # total elapsed simulation time in seconds
+    base: float  # current mean/center value (shifts with drift)
+    elapsed_s: float = 0.0  # total elapsed simulation time in seconds
 
 
 class SimulationEngine:
@@ -65,8 +67,7 @@ class SimulationEngine:
 
         # Per-register simulation state keyed by address
         self._state: dict[int, _RegState] = {
-            reg.address: _RegState(base=reg.default)
-            for reg in config.registers.holding + config.registers.input
+            reg.address: _RegState(base=reg.default) for reg in config.registers.holding + config.registers.input
         }
 
         # Active faults keyed by register name (or "_device" for dropout)
@@ -143,11 +144,7 @@ class SimulationEngine:
           - FC6/FC16 Modbus write             (holding registers, via Modbus client)
         """
         reg = next(
-            (
-                r
-                for r in self._config.registers.holding + self._config.registers.input
-                if r.address == address
-            ),
+            (r for r in self._config.registers.holding + self._config.registers.input if r.address == address),
             None,
         )
         if reg is not None and address in self._state:
@@ -167,8 +164,7 @@ class SimulationEngine:
         """Decrement fault timers; remove expired faults."""
         for f in self._faults.values():
             f.remaining_s -= dt
-        expired = [key for key, f in self._faults.items()
-                   if f.remaining_s <= 0]
+        expired = [key for key, f in self._faults.items() if f.remaining_s <= 0]
         for key in expired:
             fault = self._faults[key]
             del self._faults[key]
@@ -191,7 +187,7 @@ class SimulationEngine:
 
     def _tick_registers(
         self,
-        registers: list,  # list[RegisterConfig]
+        registers: list[RegisterConfig],
         is_input: bool,
         dt: float,
     ) -> None:
@@ -214,18 +210,12 @@ class SimulationEngine:
                             if fault.value is not None:
                                 new_val = fault.value
                         case FaultType.freeze:
-                            new_val = behaviors.raw_to_scaled(
-                                self._store.get_holding(reg.address), reg.scale
-                            )
+                            new_val = behaviors.raw_to_scaled(self._store.get_holding(reg.address), reg.scale)
                         case FaultType.dropout:
                             new_val = 0.0
                         case FaultType.noise_amplify:
-                            amplified_std = (
-                                getattr(reg.simulation, "std_dev", 0.5)
-                                * (fault.value or 10.0)
-                            )
-                            new_val = behaviors.gaussian_noise(
-                                new_val, amplified_std, self._rng)
+                            amplified_std = getattr(reg.simulation, "std_dev", 0.5) * (fault.value or 10.0)
+                            new_val = behaviors.gaussian_noise(new_val, amplified_std, self._rng)
 
             raw = behaviors.scale_to_raw(new_val, reg.scale)
             if is_input:
@@ -251,28 +241,21 @@ class SimulationEngine:
 
             case GaussianNoiseBehavior():
                 if cfg.drift and cfg.drift.enabled:
-                    state.base = behaviors.drift_step(
-                        state.base, cfg.drift.rate, cfg.drift.bounds
-                    )
+                    state.base = behaviors.drift_step(state.base, cfg.drift.rate, cfg.drift.bounds)
                 return behaviors.gaussian_noise(state.base, cfg.std_dev, self._rng)
 
             case SinusoidalBehavior():
                 # Use state.base as center (initialized from default, updatable via PATCH)
                 if cfg.drift and cfg.drift.enabled:
-                    state.base = behaviors.drift_step(
-                        state.base, cfg.drift.rate, cfg.drift.bounds
-                    )
+                    state.base = behaviors.drift_step(state.base, cfg.drift.rate, cfg.drift.bounds)
                 return behaviors.sinusoidal(state.base, cfg.amplitude, cfg.period_hours, state.elapsed_s)
 
             case DriftBehavior():
-                state.base = behaviors.drift_step(
-                    state.base, cfg.rate, cfg.bounds)
+                state.base = behaviors.drift_step(state.base, cfg.rate, cfg.bounds)
                 return state.base
 
             case SawtoothBehavior():
-                return behaviors.sawtooth(
-                    cfg.period_seconds, cfg.min, cfg.max, state.elapsed_s
-                )
+                return behaviors.sawtooth(cfg.period_seconds, cfg.min, cfg.max, state.elapsed_s)
 
             case StepBehavior():
                 return behaviors.step_value(default, cfg.steps, state.elapsed_s)
@@ -317,9 +300,7 @@ class SimulationEngine:
             else:
                 raw = self._store.get_holding(source.address)
             scaled = behaviors.raw_to_scaled(raw, source.scale)
-            triggered = _check_condition(
-                scaled, coil.trigger.condition, coil.trigger.threshold
-            )
+            triggered = _check_condition(scaled, coil.trigger.condition, coil.trigger.threshold)
             previous = self._store.get_coil(coil.address)
             self._store.set_coil(coil.address, triggered)
             if previous != triggered:
@@ -346,9 +327,7 @@ class SimulationEngine:
             else:
                 raw = self._store.get_holding(source.address)
             scaled = behaviors.raw_to_scaled(raw, source.scale)
-            triggered = _check_condition(
-                scaled, disc.trigger.condition, disc.trigger.threshold
-            )
+            triggered = _check_condition(scaled, disc.trigger.condition, disc.trigger.threshold)
             previous = self._store.get_discrete(disc.address)
             self._store.set_discrete(disc.address, triggered)
             if previous != triggered:

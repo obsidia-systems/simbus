@@ -50,10 +50,7 @@ def load_builtin(device_type: str) -> DeviceConfig:
     """
     if device_type not in BUILTIN_DEVICES:
         available = ", ".join(sorted(BUILTIN_DEVICES))
-        raise ValueError(
-            f"Unknown built-in device type '{device_type}'. "
-            f"Available: {available}"
-        )
+        raise ValueError(f"Unknown built-in device type '{device_type}'. Available: {available}")
 
     pkg = resources.files("simbus.builtin")
     ref = pkg / f"{device_type}.yaml"

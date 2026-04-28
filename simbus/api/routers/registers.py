@@ -24,13 +24,18 @@ SSE design:
 from __future__ import annotations
 
 import asyncio
-from typing import AsyncGenerator
+from collections.abc import AsyncGenerator
 
 import structlog
 from fastapi import APIRouter, HTTPException, Request, status
 from fastapi.responses import StreamingResponse
 
-from simbus.api.schemas import CoilOverrideRequest, ErrorResponse, RegisterOverrideRequest, RegisterSnapshotResponse
+from simbus.api.schemas import (
+    CoilOverrideRequest,
+    ErrorResponse,
+    RegisterOverrideRequest,
+    RegisterSnapshotResponse,
+)
 from simbus.simulation import behaviors
 from simbus.simulation.behaviors import scale_to_raw
 
@@ -243,7 +248,7 @@ async def stream_registers(request: Request) -> StreamingResponse:
 async def _sse_generator(
     queue: asyncio.Queue[str],
     sse_queues: list[asyncio.Queue[str]],
-) -> AsyncGenerator[str, None]:
+) -> AsyncGenerator[str]:
     try:
         while True:
             payload = await queue.get()

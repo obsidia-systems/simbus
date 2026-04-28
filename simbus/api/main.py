@@ -15,8 +15,8 @@ All routers access device state via request.app.state.
 from __future__ import annotations
 
 import asyncio
+from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager, suppress
-from typing import AsyncGenerator
 
 import structlog
 from fastapi import FastAPI
@@ -33,7 +33,7 @@ logger = structlog.get_logger(__name__)
 
 
 @asynccontextmanager
-async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
+async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     # Settings injected by CLI; fall back to env vars for direct uvicorn launch
     if not hasattr(app.state, "settings"):
         app.state.settings = DeviceSettings()
@@ -74,8 +74,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     app.state.server = server
 
     # --- Start tasks ---
-    server_task = asyncio.create_task(
-        server.serve_forever(), name="modbus-server")
+    server_task = asyncio.create_task(server.serve_forever(), name="modbus-server")
     engine_task = asyncio.create_task(
         engine.run(),
         name="simulation-engine",
@@ -139,8 +138,7 @@ def create_app(settings: DeviceSettings | None = None) -> FastAPI:
     )
 
     _app.include_router(status.router, tags=["status"])
-    _app.include_router(
-        registers.router, prefix="/registers", tags=["registers"])
+    _app.include_router(registers.router, prefix="/registers", tags=["registers"])
     _app.include_router(simulation.router, tags=["simulation"])
 
     return _app

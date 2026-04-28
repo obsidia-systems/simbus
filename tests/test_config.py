@@ -44,15 +44,11 @@ class TestDeviceConfig:
 
     def test_invalid_unit_id_too_high(self) -> None:
         with pytest.raises(ValidationError):
-            DeviceConfig.model_validate(
-                _minimal_device(modbus={"default_port": 5020, "unit_id": 300})
-            )
+            DeviceConfig.model_validate(_minimal_device(modbus={"default_port": 5020, "unit_id": 300}))
 
     def test_invalid_port_too_low(self) -> None:
         with pytest.raises(ValidationError):
-            DeviceConfig.model_validate(
-                _minimal_device(modbus={"default_port": 0, "unit_id": 1})
-            )
+            DeviceConfig.model_validate(_minimal_device(modbus={"default_port": 0, "unit_id": 1}))
 
     def test_trigger_references_unknown_register(self) -> None:
         with pytest.raises(ValidationError, match="unknown register"):
@@ -78,20 +74,14 @@ class TestDeviceConfig:
     def test_alarm_references_unknown_coil(self) -> None:
         with pytest.raises(ValidationError, match="unknown coil"):
             DeviceConfig.model_validate(
-                _minimal_device(
-                    alarms=[{"name": "Bad Alarm",
-                             "severity": "warning", "trigger": "ghost_coil"}]
-                )
+                _minimal_device(alarms=[{"name": "Bad Alarm", "severity": "warning", "trigger": "ghost_coil"}])
             )
 
     def test_valid_coil_with_trigger(self) -> None:
         cfg = DeviceConfig.model_validate(
             _minimal_device(
                 registers={
-                    "holding": [
-                        {"address": 0, "name": "temperature",
-                            "default": 22.5, "scale": 10}
-                    ],
+                    "holding": [{"address": 0, "name": "temperature", "default": 22.5, "scale": 10}],
                     "coils": [
                         {
                             "address": 0,

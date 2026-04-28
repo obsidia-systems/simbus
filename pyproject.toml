@@ -25,6 +25,9 @@ simbus = "simbus.cli:app"
 [dependency-groups]
 dev = ["ruff", "mypy", "pytest", "pytest-asyncio", "httpx"]
 
+[tool.ruff]
+line-length = 120
+
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM"]
 

@@ -202,44 +202,59 @@ class TestPatchRegister:
 
 class TestInjectFault:
     def test_spike_fault_accepted(self, client: TestClient) -> None:
-        r = client.post("/faults", json={
-            "fault_type": "spike",
-            "register_name": "temperature",
-            "value": 500.0,
-            "duration_s": 30.0,
-        })
+        r = client.post(
+            "/faults",
+            json={
+                "fault_type": "spike",
+                "register_name": "temperature",
+                "value": 500.0,
+                "duration_s": 30.0,
+            },
+        )
         assert r.status_code == 202
         assert r.json()["fault_type"] == "spike"
 
     def test_freeze_fault_accepted(self, client: TestClient) -> None:
-        r = client.post("/faults", json={
-            "fault_type": "freeze",
-            "register_name": "temperature",
-            "duration_s": 60.0,
-        })
+        r = client.post(
+            "/faults",
+            json={
+                "fault_type": "freeze",
+                "register_name": "temperature",
+                "duration_s": 60.0,
+            },
+        )
         assert r.status_code == 202
 
     def test_dropout_fault_accepted_no_register(self, client: TestClient) -> None:
-        r = client.post("/faults", json={
-            "fault_type": "dropout",
-            "duration_s": 10.0,
-        })
+        r = client.post(
+            "/faults",
+            json={
+                "fault_type": "dropout",
+                "duration_s": 10.0,
+            },
+        )
         assert r.status_code == 202
 
     def test_invalid_fault_type_rejected(self, client: TestClient) -> None:
-        r = client.post("/faults", json={
-            "fault_type": "explode",
-            "duration_s": 5.0,
-        })
+        r = client.post(
+            "/faults",
+            json={
+                "fault_type": "explode",
+                "duration_s": 5.0,
+            },
+        )
         assert r.status_code == 422
 
     def test_zero_duration_rejected(self, client: TestClient) -> None:
-        r = client.post("/faults", json={
-            "fault_type": "spike",
-            "register_name": "temperature",
-            "value": 400.0,
-            "duration_s": 0.0,
-        })
+        r = client.post(
+            "/faults",
+            json={
+                "fault_type": "spike",
+                "register_name": "temperature",
+                "value": 400.0,
+                "duration_s": 0.0,
+            },
+        )
         assert r.status_code == 422
 
 
@@ -258,11 +273,14 @@ class TestGetFaults:
 
     def test_injected_fault_appears_in_list(self, client: TestClient) -> None:
         client.delete("/faults")
-        client.post("/faults", json={
-            "fault_type": "freeze",
-            "register_name": "humidity",
-            "duration_s": 120.0,
-        })
+        client.post(
+            "/faults",
+            json={
+                "fault_type": "freeze",
+                "register_name": "humidity",
+                "duration_s": 120.0,
+            },
+        )
         faults = client.get("/faults").json()
         assert len(faults) == 1
         assert faults[0]["fault_type"] == "freeze"
@@ -271,12 +289,15 @@ class TestGetFaults:
 
     def test_fault_response_has_all_fields(self, client: TestClient) -> None:
         client.delete("/faults")
-        client.post("/faults", json={
-            "fault_type": "spike",
-            "register_name": "temperature",
-            "value": 999.0,
-            "duration_s": 45.0,
-        })
+        client.post(
+            "/faults",
+            json={
+                "fault_type": "spike",
+                "register_name": "temperature",
+                "value": 999.0,
+                "duration_s": 45.0,
+            },
+        )
         fault = client.get("/faults").json()[0]
         assert "fault_type" in fault
         assert "register_name" in fault
@@ -292,18 +313,24 @@ class TestGetFaults:
 
 class TestClearFaults:
     def test_clear_returns_204(self, client: TestClient) -> None:
-        client.post("/faults", json={
-            "fault_type": "dropout",
-            "duration_s": 999.0,
-        })
+        client.post(
+            "/faults",
+            json={
+                "fault_type": "dropout",
+                "duration_s": 999.0,
+            },
+        )
         r = client.delete("/faults")
         assert r.status_code == 204
 
     def test_list_empty_after_clear(self, client: TestClient) -> None:
-        client.post("/faults", json={
-            "fault_type": "dropout",
-            "duration_s": 999.0,
-        })
+        client.post(
+            "/faults",
+            json={
+                "fault_type": "dropout",
+                "duration_s": 999.0,
+            },
+        )
         client.delete("/faults")
         assert client.get("/faults").json() == []
 

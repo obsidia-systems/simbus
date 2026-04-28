@@ -41,15 +41,13 @@ class DeviceSettings(BaseSettings):
     api_port: int = Field(default=8000, ge=1024, le=65535)
 
     # Simulation
-    tick_interval: float = Field(
-        default=1.0, gt=0, description="Tick interval in seconds")
+    tick_interval: float = Field(default=1.0, gt=0, description="Tick interval in seconds")
     tick_health_log_interval: float = Field(
         default=60.0,
         gt=0,
         description="How often to emit simulation tick health logs, in seconds.",
     )
-    seed: int | None = Field(
-        default=None, description="RNG seed for reproducible behavior")
+    seed: int | None = Field(default=None, description="RNG seed for reproducible behavior")
 
     # Optional name override (takes precedence over the YAML name field)
     device_name: str | None = Field(default=None)
