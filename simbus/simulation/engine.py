@@ -124,12 +124,18 @@ class SimulationEngine:
         """Reset all registers to YAML defaults and clear all faults.
 
         The simulation continues running — only values and state are rewound.
+        Uptime and health log timers are also reset so observability stays
+        coherent.
         """
         self._store.initialize(self._config.registers)
         self._faults.clear()
         for reg in self._config.registers.holding + self._config.registers.input:
             self._state[reg.address].base = reg.default
             self._state[reg.address].elapsed_s = 0.0
+
+        now = time.monotonic()
+        self._started_monotonic = now
+        self._next_health_log_at = now + self.tick_health_log_interval
 
     def update_base(self, address: int, raw_value: int, source: str = "unknown") -> None:
         """Update simulation base for a holding or input register from a raw store value.

@@ -7,6 +7,7 @@ input register simulation, and the live tick_interval update.
 from __future__ import annotations
 
 import asyncio
+import time
 
 import pytest
 
@@ -630,3 +631,23 @@ class TestLiveTickInterval:
 
         # elapsed_s grows — confirms ticks ran after the interval change
         assert engine._state[0].elapsed_s > 0.05
+
+
+class TestResetTimers:
+    def test_reset_rewinds_uptime_and_health_log_timer(self) -> None:
+        """reset() must restart uptime and next health log from now."""
+        engine, _ = _make_engine(tick_interval=1.0)
+
+        # Simulate that the engine has been running for a while
+        engine._started_monotonic = time.monotonic() - 100.0
+        engine._next_health_log_at = time.monotonic() - 10.0
+
+        before_reset = time.monotonic()
+        engine.reset()
+        after_reset = time.monotonic()
+
+        assert engine._started_monotonic is not None
+        assert before_reset <= engine._started_monotonic <= after_reset
+
+        expected_next = engine._started_monotonic + engine.tick_health_log_interval
+        assert engine._next_health_log_at == pytest.approx(expected_next, abs=0.001)
