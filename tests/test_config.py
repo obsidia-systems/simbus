@@ -175,6 +175,46 @@ class TestBehaviorParsing:
                 }
             )
 
+    def test_drift_modifier_invalid_bounds(self) -> None:
+        with pytest.raises(ValidationError, match="bounds\[0\] must be less than bounds\[1\]"):
+            RegisterConfig.model_validate(
+                {
+                    "address": 0,
+                    "name": "temp",
+                    "default": 22.5,
+                    "scale": 10,
+                    "simulation": {
+                        "behavior": "gaussian_noise",
+                        "std_dev": 0.3,
+                        "drift": {"enabled": True, "rate": 0.01, "bounds": [35.0, 18.0]},
+                    },
+                }
+            )
+
+    def test_drift_behavior_invalid_bounds(self) -> None:
+        with pytest.raises(ValidationError, match="bounds\[0\] must be less than bounds\[1\]"):
+            RegisterConfig.model_validate(
+                {
+                    "address": 0,
+                    "name": "temp",
+                    "default": 22.5,
+                    "scale": 10,
+                    "simulation": {"behavior": "drift", "rate": 0.01, "bounds": [35.0, 18.0]},
+                }
+            )
+
+    def test_sawtooth_invalid_range(self) -> None:
+        with pytest.raises(ValidationError, match="min must be less than max"):
+            RegisterConfig.model_validate(
+                {
+                    "address": 0,
+                    "name": "temp",
+                    "default": 22.5,
+                    "scale": 10,
+                    "simulation": {"behavior": "sawtooth", "period_seconds": 10.0, "min": 50.0, "max": 20.0},
+                }
+            )
+
 
 # ---------------------------------------------------------------------------
 # Builtin loader

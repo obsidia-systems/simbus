@@ -14,7 +14,13 @@ import pytest
 from pymodbus.client import AsyncModbusTcpClient
 
 from simbus.config.loader import load_builtin
-from simbus.core.modbus_server import ModbusServerInstance
+from simbus.core.modbus_server import (
+    ModbusServerInstance,
+    _CoilBlock,
+    _DiscreteBlock,
+    _HoldingBlock,
+    _InputBlock,
+)
 from simbus.core.store import RegisterStore
 
 TEST_PORT = 19502
@@ -105,3 +111,137 @@ class TestCoils:
         result = await client.read_coils(0, count=1, device_id=UNIT_ID)
         assert not result.isError()
         assert result.bits[0] is True
+
+    async def test_write_coil(self, running_server, client):
+        store, _ = running_server
+        await client.write_coil(0, True, device_id=UNIT_ID)
+        assert store.get_coil(0) is True
+
+    async def test_write_multiple_coils(self, running_server, client):
+        store, _ = running_server
+        await client.write_coils(0, values=[True, False], device_id=UNIT_ID)
+        assert store.get_coil(0) is True
+        assert store.get_coil(1) is False
+
+
+class TestDiscreteInputs:
+    async def test_read_discrete_inputs(self, running_server, client):
+        store, _ = running_server
+        # tnh-sensor has no discrete inputs, but the block should still return empty list
+        result = await client.read_discrete_inputs(0, count=1, device_id=UNIT_ID)
+        assert not result.isError()
+
+
+class TestServerLifecycle:
+    async def test_server_stop(self):
+        cfg = load_builtin("generic-tnh-sensor")
+        store = RegisterStore()
+        store.initialize(cfg.registers)
+        server = ModbusServerInstance(store=store, port=TEST_PORT + 1, unit_id=UNIT_ID)
+        task = asyncio.create_task(server.serve_forever())
+        await asyncio.sleep(0.15)
+        await server.stop()
+        task.cancel()
+        with suppress(asyncio.CancelledError, Exception):
+            await task
+        assert server.status == "stopped"
+
+
+class TestDataBlockDirect:
+    def test_validate_and_reset(self):
+        store = RegisterStore()
+        store.initialize(load_builtin("generic-tnh-sensor").registers)
+
+        for block in [
+            _HoldingBlock(store),
+            _InputBlock(store),
+            _CoilBlock(store),
+            _DiscreteBlock(store),
+        ]:
+            assert block.validate(0, count=1) is True
+            block.reset()  # no-op, must not raise
+
+    def test_input_block_setvalues_noop(self):
+        from simbus.core.modbus_server import _InputBlock
+
+        store = RegisterStore()
+        store.initialize(load_builtin("generic-tnh-sensor").registers)
+        block = _InputBlock(store)
+        block.setValues(0, [100])  # no-op, must not raise
+
+    def test_discrete_block_setvalues_noop(self):
+        from simbus.core.modbus_server import _DiscreteBlock
+
+        store = RegisterStore()
+        store.initialize(load_builtin("generic-tnh-sensor").registers)
+        block = _DiscreteBlock(store)
+        block.setValues(0, [True])  # no-op, must not raise
+
+
+class TestHoldingWriteCallback:
+    async def test_modbus_write_triggers_callback(self):
+        cfg = load_builtin("generic-tnh-sensor")
+        store = RegisterStore()
+        store.initialize(cfg.registers)
+        callback_calls = []
+
+        def on_write(addr: int, raw: int, source: str = "") -> None:
+            callback_calls.append((addr, raw, source))
+
+        server = ModbusServerInstance(store=store, port=TEST_PORT + 2, unit_id=UNIT_ID, on_holding_write=on_write)
+        task = asyncio.create_task(server.serve_forever())
+        await asyncio.sleep(0.15)
+
+        client = AsyncModbusTcpClient("127.0.0.1", port=TEST_PORT + 2)
+        await client.connect()
+        await client.write_register(0, 300, device_id=UNIT_ID)
+
+        assert len(callback_calls) == 1
+        assert callback_calls[0] == (0, 300, "modbus")
+
+        client.close()
+        await server.stop()
+        task.cancel()
+        with suppress(asyncio.CancelledError, Exception):
+            await task
+
+
+class TestInputRegisters:
+    def test_input_block_getvalues(self):
+        from simbus.core.modbus_server import _InputBlock
+
+        store = RegisterStore()
+        store.initialize(load_builtin("generic-tnh-sensor").registers)
+        store.set_input(0, 500)
+        block = _InputBlock(store)
+        assert block.getValues(1, count=1) == [500]  # pymodbus adds +1 offset internally
+
+
+class TestServerException:
+    async def test_server_status_stopped_after_exception(self):
+        from unittest.mock import patch
+
+        cfg = load_builtin("generic-tnh-sensor")
+        store = RegisterStore()
+        store.initialize(cfg.registers)
+        server = ModbusServerInstance(store=store, port=TEST_PORT + 4, unit_id=UNIT_ID)
+
+        async def _boom(*args) -> None:
+            raise RuntimeError("boom")
+
+        mock_server_cls = type("MockModbusTcpServer", (), {"serve_forever": _boom})
+        with (
+            patch("simbus.core.modbus_server.ModbusTcpServer", return_value=mock_server_cls()),
+            pytest.raises(RuntimeError, match="boom"),
+        ):
+            await server.serve_forever()
+
+        assert server.status == "stopped"
+
+    def test_port_and_unit_id_properties(self):
+        cfg = load_builtin("generic-tnh-sensor")
+        store = RegisterStore()
+        store.initialize(cfg.registers)
+        server = ModbusServerInstance(store=store, port=19599, unit_id=42)
+        assert server.port == 19599
+        assert server.unit_id == 42

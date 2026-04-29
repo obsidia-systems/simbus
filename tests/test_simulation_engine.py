@@ -532,6 +532,176 @@ class TestFaultInjection:
         engine.clear_faults()
         assert len(engine._faults) == 0
 
+    def test_freeze_holds_current_value(self) -> None:
+        cfg = _minimal_config(
+            {
+                "holding": [
+                    {"address": 0, "name": "temp", "default": 22.5, "scale": 10, "simulation": {"behavior": "constant"}}
+                ],
+            }
+        )
+        store = RegisterStore()
+        store.initialize(cfg.registers)
+        engine = SimulationEngine(store=store, config=cfg)
+        store.set_holding(0, 300)  # 30.0°C
+        engine.inject_fault(
+            ActiveFault(
+                fault_type=FaultType.freeze,
+                register_name="temp",
+                value=None,
+                duration_s=10.0,
+                remaining_s=10.0,
+            )
+        )
+        engine._tick(1.0)
+        # Freeze must keep the value that was current when the fault was injected
+        assert store.get_holding(0) == 300
+
+    def test_noise_amplify_increases_std_dev(self) -> None:
+        cfg = _minimal_config(
+            {
+                "holding": [
+                    {
+                        "address": 0,
+                        "name": "temp",
+                        "default": 22.5,
+                        "scale": 10,
+                        "simulation": {"behavior": "gaussian_noise", "std_dev": 0.1},
+                    }
+                ],
+            }
+        )
+        store = RegisterStore()
+        store.initialize(cfg.registers)
+        engine = SimulationEngine(store=store, config=cfg, seed=0)
+        engine.inject_fault(
+            ActiveFault(
+                fault_type=FaultType.noise_amplify,
+                register_name="temp",
+                value=50.0,
+                duration_s=10.0,
+                remaining_s=10.0,
+            )
+        )
+        engine._tick(1.0)
+        # Value should have moved (amplified noise is large)
+        assert store.get_holding(0) != 225
+
+
+class TestSinusoidalWithDrift:
+    def test_sinusoidal_applies_drift_to_base(self) -> None:
+        cfg = _minimal_config(
+            {
+                "holding": [
+                    {
+                        "address": 0,
+                        "name": "temp",
+                        "default": 20.0,
+                        "scale": 10,
+                        "simulation": {
+                            "behavior": "sinusoidal",
+                            "period_hours": 1.0,
+                            "amplitude": 1.0,
+                            "drift": {"enabled": True, "rate": 0.5, "bounds": [18.0, 30.0]},
+                        },
+                    }
+                ],
+            }
+        )
+        store = RegisterStore()
+        store.initialize(cfg.registers)
+        engine = SimulationEngine(store=store, config=cfg)
+        engine._tick(1.0)
+        # Base should have drifted upward from 20.0
+        assert engine._state[0].base > 20.0
+        assert store.get_holding(0) != 200
+
+
+class TestStepBehavior:
+    def test_step_jumps_at_elapsed_time(self) -> None:
+        cfg = _minimal_config(
+            {
+                "holding": [
+                    {
+                        "address": 0,
+                        "name": "level",
+                        "default": 0.0,
+                        "scale": 1,
+                        "simulation": {
+                            "behavior": "step",
+                            "steps": [{"at": 2.0, "value": 10.0}, {"at": 5.0, "value": 20.0}],
+                        },
+                    }
+                ],
+            }
+        )
+        store = RegisterStore()
+        store.initialize(cfg.registers)
+        engine = SimulationEngine(store=store, config=cfg)
+        engine._tick(1.0)  # elapsed=1.0
+        assert store.get_holding(0) == 0
+        engine._tick(1.5)  # elapsed=2.5
+        assert store.get_holding(0) == 10
+        engine._tick(3.0)  # elapsed=5.5
+        assert store.get_holding(0) == 20
+
+
+class TestSnapshotAndHealth:
+    def test_publish_snapshot_with_subscriber(self) -> None:
+        engine, _ = _make_engine()
+        queue: asyncio.Queue[str] = asyncio.Queue()
+        engine.sse_queues.append(queue)
+        engine._publish_snapshot()
+        assert not queue.empty()
+        payload = queue.get_nowait()
+        assert "holding" in payload
+
+    def test_health_log_emitted_when_due(self) -> None:
+        engine, _ = _make_engine(tick_interval=1.0, tick_health_log_interval=0.5)
+        engine._started_monotonic = time.monotonic() - 1.0
+        before = time.monotonic() - 0.1
+        engine._next_health_log_at = before
+        # Should not raise and should advance _next_health_log_at
+        engine._log_tick_health_if_due(now=time.monotonic(), tick_duration_ms=1.0, loop_drift_ms=0.0)
+        assert engine._next_health_log_at is not None
+        assert engine._next_health_log_at > before
+
+    def test_health_log_skips_when_timer_none(self) -> None:
+        engine, _ = _make_engine()
+        engine._next_health_log_at = None
+        # Should not raise
+        engine._log_tick_health_if_due(now=time.monotonic(), tick_duration_ms=1.0, loop_drift_ms=0.0)
+
+
+class TestDiscreteTriggerFromInput:
+    def test_discrete_trigger_reads_input_register(self) -> None:
+        cfg = _minimal_config(
+            {
+                "input": [
+                    {
+                        "address": 0,
+                        "name": "temp_ro",
+                        "default": 35.0,
+                        "scale": 10,
+                        "simulation": {"behavior": "constant"},
+                    }
+                ],
+                "discrete": [
+                    {
+                        "address": 0,
+                        "name": "hot",
+                        "default": False,
+                        "trigger": {"source_register": "temp_ro", "condition": "gt", "threshold": 30.0},
+                    }
+                ],
+            }
+        )
+        store = RegisterStore()
+        store.initialize(cfg.registers)
+        engine = SimulationEngine(store=store, config=cfg)
+        engine._tick(1.0)
+        assert store.get_discrete(0) is True
+
 
 # ---------------------------------------------------------------------------
 # Live tick_interval update (bug fix verification)

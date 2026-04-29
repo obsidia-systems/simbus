@@ -12,6 +12,8 @@ The test app is configured with:
 
 from __future__ import annotations
 
+from importlib import resources
+
 import pytest
 from starlette.testclient import TestClient
 
@@ -436,3 +438,143 @@ class TestDeviceNameOverride:
         with TestClient(app) as c:
             data = c.get("/status").json()
             assert data["name"] == "Lab Sensor A"
+
+
+class TestYamlPath:
+    def test_load_from_yaml_path(self) -> None:
+        pkg = resources.files("simbus.builtin")
+        yaml_path = str(pkg / "generic-ups.yaml")
+        settings = DeviceSettings(
+            yaml_path=yaml_path,
+            tick_interval=9999.0,
+            modbus_port=19505,
+        )
+        app = create_app(settings=settings)
+        with TestClient(app) as c:
+            data = c.get("/status").json()
+            assert data["name"] == "Generic UPS"
+            assert data["type"] == "ups"
+
+    def test_fallback_settings_when_none_provided(self) -> None:
+        """When create_app() receives no settings, lifespan falls back to env vars."""
+        app = create_app()
+        with TestClient(app) as c:
+            data = c.get("/status").json()
+            assert data["type"] == "tnh_sensor"
+
+
+# ---------------------------------------------------------------------------
+# PATCH /registers/coils and /registers/discrete
+# ---------------------------------------------------------------------------
+
+
+class TestCoilAndDiscrete:
+    def test_override_coil(self) -> None:
+        settings = DeviceSettings(
+            device_type="generic-door-contact",
+            tick_interval=9999.0,
+            modbus_port=19506,
+        )
+        app = create_app(settings=settings)
+        with TestClient(app) as c:
+            r = c.patch("/registers/coils/0", json={"value": True})
+            assert r.status_code == 200
+            assert r.json()["value"] is True
+            assert c.get("/registers").json()["coils"]["0"] is True
+
+    def test_override_coil_404(self) -> None:
+        settings = DeviceSettings(
+            device_type="generic-door-contact",
+            tick_interval=9999.0,
+            modbus_port=19507,
+        )
+        app = create_app(settings=settings)
+        with TestClient(app) as c:
+            r = c.patch("/registers/coils/99", json={"value": True})
+            assert r.status_code == 404
+
+    def test_override_discrete(self) -> None:
+        settings = DeviceSettings(
+            device_type="generic-door-contact",
+            tick_interval=9999.0,
+            modbus_port=19508,
+        )
+        app = create_app(settings=settings)
+        with TestClient(app) as c:
+            r = c.patch("/registers/discrete/0", json={"value": False})
+            assert r.status_code == 200
+            assert r.json()["value"] is False
+            assert c.get("/registers").json()["discrete"]["0"] is False
+
+    def test_override_discrete_404(self) -> None:
+        settings = DeviceSettings(
+            device_type="generic-door-contact",
+            tick_interval=9999.0,
+            modbus_port=19509,
+        )
+        app = create_app(settings=settings)
+        with TestClient(app) as c:
+            r = c.patch("/registers/discrete/99", json={"value": True})
+            assert r.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# PATCH /registers/input
+# ---------------------------------------------------------------------------
+
+
+class TestInputRegister:
+    def test_override_input_register(self, tmp_path) -> None:
+        yaml_file = tmp_path / "input-device.yaml"
+        yaml_file.write_text(
+            "name: Input Device\n"
+            "version: '1.0'\n"
+            "type: input_test\n"
+            "modbus:\n"
+            "  default_port: 502\n"
+            "  unit_id: 1\n"
+            "registers:\n"
+            "  input:\n"
+            "    - address: 0\n"
+            "      name: temp_ro\n"
+            "      default: 25.0\n"
+            "      scale: 10\n"
+        )
+        settings = DeviceSettings(
+            yaml_path=str(yaml_file),
+            tick_interval=9999.0,
+            modbus_port=19510,
+        )
+        app = create_app(settings=settings)
+        with TestClient(app) as c:
+            r = c.patch("/registers/input/0", json={"value": 350})
+            assert r.status_code == 200
+            assert r.json()["raw_value"] == 350
+            assert r.json()["real_value"] == pytest.approx(35.0)
+            assert c.get("/registers").json()["input"]["0"] == 350
+
+    def test_override_input_register_404(self, tmp_path) -> None:
+        yaml_file = tmp_path / "input-device.yaml"
+        yaml_file.write_text(
+            "name: Input Device\n"
+            "version: '1.0'\n"
+            "type: input_test\n"
+            "modbus:\n"
+            "  default_port: 502\n"
+            "  unit_id: 1\n"
+            "registers:\n"
+            "  input:\n"
+            "    - address: 0\n"
+            "      name: temp_ro\n"
+            "      default: 25.0\n"
+            "      scale: 10\n"
+        )
+        settings = DeviceSettings(
+            yaml_path=str(yaml_file),
+            tick_interval=9999.0,
+            modbus_port=19511,
+        )
+        app = create_app(settings=settings)
+        with TestClient(app) as c:
+            r = c.patch("/registers/input/99", json={"value": 100})
+            assert r.status_code == 404
