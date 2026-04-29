@@ -7,7 +7,8 @@ and operator training — **no hardware required**.
 
 [![Python 3.14](https://img.shields.io/badge/python-3.14+-3776AB?style=flat-square&logo=python&logoColor=white)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-yellow?style=flat-square)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-126%20passing-22c55e?style=flat-square&logo=pytest&logoColor=white)](#development)
+[![Tests](https://img.shields.io/badge/tests-188%20passing-22c55e?style=flat-square&logo=pytest&logoColor=white)](#development)
+[![Coverage](https://img.shields.io/badge/coverage-97%25-22c55e?style=flat-square)](#development)
 [![Docker](https://img.shields.io/badge/docker-ready-2496ED?style=flat-square&logo=docker&logoColor=white)](#docker)
 [![Modbus TCP](https://img.shields.io/badge/protocol-Modbus%20TCP-FF6B35?style=flat-square)](#architecture)
 [![pymodbus](https://img.shields.io/badge/pymodbus-3.12.x-blueviolet?style=flat-square)](https://github.com/pymodbus-dev/pymodbus)
@@ -17,21 +18,17 @@ and operator training — **no hardware required**.
 > **Each container = one device.** Modbus TCP server + simulation engine + REST control API.
 > Stack as many as you need. Works with Ignition, Wonderware, FactoryTalk, and any Modbus client.
 
-```text
-┌──────────────────────────────────────────────────────────────────────┐
-│  docker compose --profile all up                                     │
-│                                                                      │
-│   simbus-tnh-sensor    ── Host :5020 → Device :502   API :8000→8000│
-│   simbus-ups           ── Host :5021 → Device :502   API :8001→8000│
-│   simbus-pdu           ── Host :5022 → Device :502   API :8002→8000│
-│   simbus-crac          ── Host :5023 → Device :502   API :8003→8000│
-│   simbus-power-meter   ── Host :5024 → Device :502   API :8004→8000│
-│   simbus-leak-sensor   ── Host :5025 → Device :502   API :8005→8000│
-│   simbus-door-contact  ── Host :5026 → Device :502   API :8006→8000│
-└──────────────────────────────────────────────────────────────────────┘
-          │                                  │
-   Ignition / SCADA                   Your GUI / Tests
-   reads Modbus TCP                   calls REST API
+```mermaid
+flowchart LR
+    subgraph fleet["simbus fleet — one container per device"]
+        device["🔌 Modbus :5020+ | 🌐 API :8000+"]
+    end
+
+    scada["Ignition / SCADA<br/>Modbus TCP client"]
+    gui["Your GUI / Tests<br/>REST API client"]
+
+    scada -->|FC1/FC3 reads| device
+    gui -->|POST /faults<br/>GET /scenarios| device
 ```
 
 ---
@@ -58,6 +55,7 @@ static, hard to script, or impossible to containerize. **simbus** was built to f
 - [Built-in Devices](#built-in-devices)
 - [Architecture](#architecture)
 - [Simulation Behaviors](#simulation-behaviors)
+- [Scenarios](#scenarios)
 - [REST API Reference](#rest-api-reference)
 - [Fault Injection](#fault-injection)
 - [Connecting to Ignition](#connecting-to-ignition)
@@ -163,11 +161,15 @@ flowchart TB
         store[("📦 RegisterStore\nin-memory dict")]
         modbus["🔌 Modbus TCP Server\npymodbus 3.12.x"]
         api["🌐 FastAPI\nREST + SSE"]
+        scenario["📜 ScenarioRunner\ntimed event replay"]
 
         engine -- "writes every tick" --> store
         store -- "serves registers" --> modbus
         api -- "reads / writes" --> store
         api -- "controls" --> engine
+        api -- "runs / stops" --> scenario
+        scenario -- "injects events" --> engine
+        scenario -- "writes" --> store
     end
 
     scada["🖥️ Ignition / SCADA\nModbus client"]
@@ -207,6 +209,12 @@ flowchart LR
 
 > Because asyncio is cooperative, all reads and writes to `RegisterStore` are atomic —
 > no `asyncio.Lock` needed.
+>
+> **ScenarioRunner** (v0.2+) runs as an independent asyncio task inside the container.
+> It replays timed event sequences from YAML scenario files, injecting faults and
+> register overrides at scheduled wall-clock times without blocking the main tick loop.
+> This makes it possible to script full event chains (power outage, thermal runaway,
+> sensor failure) and replay them on demand via `POST /scenarios/{name}/run`.
 
 ---
 
@@ -254,6 +262,134 @@ simulation:
 
 > **Time acceleration:** Set `SIMBUS_TICK_INTERVAL=60.0` — each real second simulates one minute
 > of device time. Great for long-period sinusoidal tests.
+
+---
+
+## Scenarios
+
+A **scenario** is a timed sequence of events stored in a YAML file. Instead of manually
+calling the REST API at the right moment, you define the entire event sequence once
+and replay it on demand.
+
+```mermaid
+flowchart LR
+    subgraph scenario["📄 Scenario YAML"]
+        steps["steps:\n- at: 0\n- at: 2\n- at: 5"]
+    end
+
+    runner["⚙️ ScenarioRunner\n(async task)"]
+    engine["🔧 SimulationEngine\n(tick loop)"]
+    store[("📦 RegisterStore")]
+    api["🌐 REST API\n/scenarios/{name}/run"]
+
+    scenario --> runner
+    api -->|POST| runner
+    runner -->|set_register\ninject_fault\nset_coil| engine
+    engine --> store
+```
+
+### Built-in example: Heat Wave
+
+```yaml
+# scenarios/heat-wave.yaml (one of 5 built-in examples)
+name: "Heat Wave Event"
+description: >
+  Gradual temperature rise triggering high-temp alarm after 10 seconds.
+steps:
+  - at: 0
+    action: set_register
+    register_name: temperature
+    value: 22.0
+
+  - at: 2
+    action: set_register
+    register_name: temperature
+    value: 25.0
+
+  - at: 5
+    action: set_register
+    register_name: temperature
+    value: 30.0
+
+  - at: 12
+    action: inject_fault
+    fault_type: spike
+    register_name: temperature
+    value: 42.0
+    duration_s: 30
+
+  - at: 15
+    action: set_tick_interval
+    tick_interval: 0.5
+```
+
+> **5 built-in scenarios:** `heat-wave`, `thermal-runaway`, `power-outage`, `fast-alarm-test`, `stuck-sensor`.
+
+### Scenario step types
+
+| Step `action` | What happens | Parameters |
+|---|---|---|
+| `set_register` | Writes a real-world value to a holding or input register | `register_name`, `value`, `register_type` |
+| `inject_fault` | Injects a fault with auto-expiry | `fault_type`, `register_name`, `value`, `duration_s` |
+| `set_coil` | Forces a coil or discrete input to `true`/`false` | `coil`, `value` |
+| `set_tick_interval` | Changes simulation speed mid-scenario | `tick_interval` |
+
+> Steps are sorted by `at` (seconds) before execution. The runner runs in a
+> separate asyncio task — the main tick loop is never blocked.
+
+### Scenario execution timeline
+
+```mermaid
+sequenceDiagram
+    participant Test as 🧪 Test / CI
+    participant API as REST API
+    participant Runner as ScenarioRunner
+    participant Engine as SimulationEngine
+
+    Test->>API: POST /scenarios/heat-wave/run
+    API->>Runner: run(scenario)
+    activate Runner
+    Note over Runner: sort steps by `at`
+
+    Runner->>Engine: set_register temp=22°C
+    Engine-->>Runner: ack
+
+    Runner->>Runner: sleep(2s)
+    Runner->>Engine: set_register temp=25°C
+
+    Runner->>Runner: sleep(3s)
+    Runner->>Engine: set_register temp=30°C
+
+    Runner->>Runner: sleep(7s)
+    Runner->>Engine: inject_fault spike 42°C/30s
+
+    Runner->>Runner: sleep(3s)
+    Runner->>Engine: set_tick_interval 0.5s
+
+    Runner-->>API: state: "completed"
+    deactivate Runner
+    Test->>API: GET /scenarios/active
+    API-->>Test: state: "completed"
+```
+
+### Using scenarios from the API
+
+```bash
+# List available scenarios
+ curl http://localhost:8000/scenarios
+# [{"name": "heat-wave", "description": "..."}]
+
+# Start replay
+ curl -X POST http://localhost:8000/scenarios/heat-wave/run
+# {"status": "started", "scenario": "heat-wave", "steps": 7}
+
+# Check progress
+ curl http://localhost:8000/scenarios/active
+# {"state": "running", "scenario_name": "heat-wave", "step_index": 3, "total_steps": 7, "elapsed_s": 5.2}
+
+# Cancel early
+ curl -X POST http://localhost:8000/scenarios/stop
+```
 
 ---
 
@@ -307,6 +443,15 @@ curl -N http://localhost:8000/registers/stream
 | --- | --- | --- |
 | `PATCH` | `/simulation` | Update tick interval live — takes effect next tick |
 | `POST` | `/simulation/reset` | Reset all registers to YAML defaults, clear all faults |
+
+### Scenarios
+
+| Method | Endpoint | Description |
+| --- | --- | --- |
+| `GET` | `/scenarios` | List available scenario YAML files |
+| `POST` | `/scenarios/{name}/run` | Start replaying a scenario |
+| `GET` | `/scenarios/active` | Active scenario status (step, elapsed, total) |
+| `POST` | `/scenarios/stop` | Cancel any running scenario |
 
 ---
 
@@ -571,7 +716,7 @@ uv sync
 ### Run tests
 
 ```bash
-uv run pytest                                 # 134 tests
+uv run pytest                                 # 188 tests, 97% coverage
 uv run pytest -v tests/test_api.py            # single module
 uv run pytest --cov=simbus --cov-report=html  # coverage report
 ```
@@ -595,7 +740,8 @@ simbus/
 │   │   └── routers/
 │   │       ├── status.py      # GET /status, GET /config
 │   │       ├── registers.py   # GET|PATCH /registers, SSE stream
-│   │       └── simulation.py  # /faults, PATCH|POST /simulation
+│   │       ├── simulation.py  # /faults, PATCH|POST /simulation
+│   │       └── scenarios.py   # /scenarios list, run, stop
 │   ├── builtin/               # 7 built-in device YAML files
 │   ├── config/
 │   │   ├── schema.py          # Pydantic v2 models for device YAML
@@ -603,6 +749,10 @@ simbus/
 │   ├── core/
 │   │   ├── store.py           # In-memory register bank (no locks needed)
 │   │   └── modbus_server.py   # pymodbus 3.12.x async TCP server
+│   ├── scenarios/
+│   │   ├── schema.py          # Pydantic v2 models for scenario YAML
+│   │   ├── loader.py          # Scenario YAML loader
+│   │   └── engine.py          # ScenarioRunner (async replay)
 │   ├── simulation/
 │   │   ├── engine.py          # Async tick loop, behavior dispatch, alarms
 │   │   ├── behaviors.py       # Pure behavior functions
@@ -610,18 +760,29 @@ simbus/
 │   ├── logging_config.py      # structlog + stdlib logging configuration
 │   ├── settings.py            # pydantic-settings with SIMBUS_ prefix
 │   └── cli.py                 # Typer CLI — `simbus`
+├── scenarios/                 # Built-in scenario YAML files
+│   ├── heat-wave.yaml         # Gradual temperature rise with spike
+│   ├── thermal-runaway.yaml   # Alarm threshold crossing + recovery
+│   ├── power-outage.yaml      # UPS battery drain sequence
+│   ├── fast-alarm-test.yaml   # CI-friendly 3-second alarm test
+│   └── stuck-sensor.yaml      # Frozen sensor vs rising heat
 └── tests/
-    ├── test_config.py             # Schema validation + YAML loader (20 tests)
-    ├── test_behaviors.py          # Pure behavior functions (30 tests)
-    ├── test_simulation_engine.py  # Engine tick, alarms, faults (26 tests)
-    ├── test_modbus_server.py      # Modbus integration via TCP client (8 tests)
-    └── test_api.py                # Full API integration (42 tests)
+    ├── test_cli.py                # CLI entrypoint (3 tests)
+    ├── test_config.py             # Schema validation + YAML loader
+    ├── test_behaviors.py          # Pure behavior functions
+    ├── test_modbus_server.py      # Modbus integration via TCP client
+    ├── test_scenarios.py          # Scenario engine + API (17 tests)
+    ├── test_simulation_engine.py  # Engine tick, alarms, faults
+    ├── test_store.py              # RegisterStore (3 tests)
+    └── test_api.py                # Full API integration
 ```
 
 ### Documentation
 
 - [docs/simulation.md](docs/simulation.md) — Full simulation engine reference: every behavior,
   the drift modifier, alarm triggers, all fault types, and practical recipes.
+- [docs/scenarios.md](docs/scenarios.md) — Scenario engine reference: step types, schema,
+  runner behavior, and practical recipes for alarm pipeline testing.
 
 ### Contributing
 
@@ -640,24 +801,29 @@ Contributions are welcome. Open an issue first to discuss significant changes.
 ```mermaid
 timeline
     title simbus Roadmap
-    v0.1 — Core : Modbus TCP server
-               : 7 built-in devices
-               : Simulation engine (6 behaviors)
-               : REST API + SSE stream
-               : Fault injection
-               : Docker multi-stage
-               : 134 passing tests
-    v0.2 — Scenarios : Scenario playback system
-                     : Pre-defined event sequences (YAML)
-                     : CLI scenario player
-                     : Import telemetry from CSV
-    v0.3 — simbus-ui : Web dashboard (simbus-ui)
-                     : Visual fault injection
-                     : Live register charts
-                     : Device fleet view
-    v1.0 — Protocols : BACnet/IP protocol support
+    v0.1 — Core ✅ : Modbus TCP server
+                    : 7 built-in devices
+                    : Simulation engine (6 behaviors)
+                    : REST API + SSE stream
+                    : Fault injection
+                    : Docker multi-stage
+                    : 188 passing tests, 97% coverage
+    v0.2 — Scenarios ✅ : Scenario playback system
+                         : Pre-defined event sequences (YAML)
+                         : Scenario API endpoints
+                         : 5 practical recipes included
+    v0.3 — Observability : Prometheus /metrics endpoint
+                          : Health check expansion (ready/live)
+                          : OpenTelemetry tracing
+                          : Community device skill
+    v0.4 — Connectivity : MQTT publisher mode
+                         : SNMP v2c support for network PDUs
+                         : Time acceleration controls
+                         : Snapshot / restore full device state
+    v1.0 — Protocols : BACnet/IP support
                      : DNP3 protocol support
                      : OPC-UA server mode
+                     : Protocol abstraction layer
 ```
 
 ---

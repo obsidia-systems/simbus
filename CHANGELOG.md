@@ -52,6 +52,19 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - `devices/` folder added to the Docker image (builder `COPY devices/` +
   runtime `COPY --from=builder /app/devices`). Custom YAML device definitions are
   now available inside the container without a volume mount.
+- **Scenario Engine** — `ScenarioRunner` replays timed event sequences from YAML files:
+  - `GET /scenarios` — list available scenario files
+  - `POST /scenarios/{name}/run` — start replaying a scenario
+  - `GET /scenarios/active` — runner status (step, elapsed, total)
+  - `POST /scenarios/stop` — cancel active scenario
+  - Four step types: `set_register`, `inject_fault`, `set_coil`, `set_tick_interval`
+  - Runs as independent asyncio task (non-blocking)
+  - Steps auto-sorted by `at` timestamp
+- `scenarios/heat-wave.yaml` — built-in example scenario with 7 steps simulating a
+  temperature rise event, spike fault, and tick interval change.
+- `docs/scenarios.md` — full scenario engine reference: schema, step types, runner
+  behavior, and practical recipes.
+- `simbus/scenarios/` package with `schema.py`, `loader.py`, `engine.py`.
 
 ### Fixed
 
