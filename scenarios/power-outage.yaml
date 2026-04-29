@@ -1,0 +1,49 @@
+name: "UPS Power Failure"
+description: >
+  Mains drops, UPS switches to battery, then drains to shutdown.
+  Tests on-battery and low-battery alarm firing sequence.
+steps:
+  - at: 0
+    action: set_register
+    register_name: input_voltage
+    value: 0.0
+
+  - at: 2
+    action: set_coil
+    coil: on_battery_alarm
+    value: true
+
+  - at: 5
+    action: set_register
+    register_name: battery_soc
+    value: 80.0
+
+  - at: 60
+    action: set_register
+    register_name: battery_soc
+    value: 50.0
+
+  - at: 120
+    action: set_register
+    register_name: battery_soc
+    value: 20.0
+
+  - at: 125
+    action: set_coil
+    coil: low_battery_alarm
+    value: true
+
+  - at: 180
+    action: set_register
+    register_name: battery_soc
+    value: 5.0
+
+  - at: 200
+    action: set_coil
+    coil: on_battery_alarm
+    value: false
+
+  - at: 200
+    action: set_coil
+    coil: low_battery_alarm
+    value: false

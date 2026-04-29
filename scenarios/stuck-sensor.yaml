@@ -1,0 +1,20 @@
+name: "Stuck Sensor"
+description: >
+  Temperature sensor freezes while another thermal indicator rises.
+  Tests SCADA stale-data detection.
+steps:
+  - at: 0
+    action: set_register
+    register_name: temperature
+    value: 22.0
+
+  - at: 5
+    action: inject_fault
+    fault_type: freeze
+    register_name: temperature
+    duration_s: 60
+
+  - at: 10
+    action: set_register
+    register_name: humidity
+    value: 80.0

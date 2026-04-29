@@ -1,0 +1,36 @@
+name: "Thermal Runaway"
+description: >
+  Temperature climbs through alarm threshold, spike hits, then recovery.
+  Tests SCADA alarm detection, escalation, and auto-clear logic.
+steps:
+  - at: 0
+    action: set_register
+    register_name: temperature
+    value: 22.0
+
+  - at: 10
+    action: set_register
+    register_name: temperature
+    value: 28.0
+
+  - at: 20
+    action: set_register
+    register_name: temperature
+    value: 32.0
+
+  - at: 30
+    action: inject_fault
+    fault_type: spike
+    register_name: temperature
+    value: 45.0
+    duration_s: 60
+
+  - at: 40
+    action: set_register
+    register_name: temperature
+    value: 35.0
+
+  - at: 120
+    action: set_register
+    register_name: temperature
+    value: 22.0

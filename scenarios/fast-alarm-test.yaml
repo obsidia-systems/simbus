@@ -1,0 +1,22 @@
+name: "Fast Alarm Test"
+description: >
+  Accelerated thermal event for CI pipelines.
+  Completes in ~3 seconds with 10x time acceleration.
+steps:
+  - at: 0
+    action: set_tick_interval
+    tick_interval: 0.1
+
+  - at: 0.5
+    action: set_register
+    register_name: temperature
+    value: 35.0
+
+  - at: 2.0
+    action: set_register
+    register_name: temperature
+    value: 22.0
+
+  - at: 2.5
+    action: set_tick_interval
+    tick_interval: 1.0
