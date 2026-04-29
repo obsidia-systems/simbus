@@ -455,8 +455,11 @@ class TestYamlPath:
             assert data["name"] == "Generic UPS"
             assert data["type"] == "ups"
 
-    def test_fallback_settings_when_none_provided(self) -> None:
+    def test_fallback_settings_when_none_provided(self, monkeypatch) -> None:
         """When create_app() receives no settings, lifespan falls back to env vars."""
+        # Use high ports to avoid privilege/collision issues in CI
+        monkeypatch.setenv("SIMBUS_API_PORT", "18000")
+        monkeypatch.setenv("SIMBUS_MODBUS_PORT", "18001")
         app = create_app()
         with TestClient(app) as c:
             data = c.get("/status").json()
