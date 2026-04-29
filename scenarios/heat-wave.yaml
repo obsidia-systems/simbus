@@ -1,0 +1,40 @@
+name: "Heat Wave Event"
+description: >
+  Simulates a gradual temperature rise in a server room,
+  triggering the high-temp alarm after 10 seconds.
+  Useful for testing SCADA alarm pipelines and notification chains.
+steps:
+  - at: 0
+    action: set_register
+    register_name: temperature
+    value: 22.0
+
+  - at: 2
+    action: set_register
+    register_name: temperature
+    value: 25.0
+
+  - at: 5
+    action: set_register
+    register_name: temperature
+    value: 30.0
+
+  - at: 10
+    action: set_register
+    register_name: temperature
+    value: 35.0
+
+  - at: 12
+    action: inject_fault
+    fault_type: spike
+    register_name: temperature
+    value: 42.0
+    duration_s: 30
+
+  - at: 15
+    action: set_tick_interval
+    tick_interval: 0.5
+
+  - at: 45
+    action: set_tick_interval
+    tick_interval: 1.0

@@ -27,6 +27,7 @@ from simbus.config.loader import load_builtin, load_from_file
 from simbus.core.modbus_server import ModbusServerInstance
 from simbus.core.store import RegisterStore
 from simbus.logging_config import configure_logging
+from simbus.scenarios.engine import ScenarioRunner
 from simbus.settings import DeviceSettings
 from simbus.simulation.engine import SimulationEngine
 
@@ -74,10 +75,13 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
         on_holding_write=engine.update_base,
     )
 
+    scenario_runner = ScenarioRunner(engine=engine, store=store, config=cfg)
+
     app.state.config = cfg
     app.state.store = store
     app.state.engine = engine
     app.state.server = server
+    app.state.scenario_runner = scenario_runner
 
     # --- Start tasks ---
     server_task = asyncio.create_task(server.serve_forever(), name="modbus-server")
@@ -121,7 +125,7 @@ def create_app(settings: DeviceSettings | None = None) -> FastAPI:
         settings: Pre-built settings (CLI / tests).
                   If None, settings are read from env vars at startup.
     """
-    from simbus.api.routers import registers, simulation, status
+    from simbus.api.routers import registers, scenarios, simulation, status
 
     configure_logging()
 
@@ -146,6 +150,7 @@ def create_app(settings: DeviceSettings | None = None) -> FastAPI:
     _app.include_router(status.router, tags=["status"])
     _app.include_router(registers.router, prefix="/registers", tags=["registers"])
     _app.include_router(simulation.router, tags=["simulation"])
+    _app.include_router(scenarios.router, prefix="/scenarios", tags=["scenarios"])
 
     return _app
 
