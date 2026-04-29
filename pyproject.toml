@@ -23,7 +23,7 @@ dependencies = [
 simbus = "simbus.cli:app"
 
 [dependency-groups]
-dev = ["ruff", "mypy", "pytest", "pytest-asyncio", "httpx"]
+dev = ["ruff", "mypy", "pytest", "pytest-asyncio", "pytest-cov", "httpx"]
 
 [tool.ruff]
 line-length = 120
