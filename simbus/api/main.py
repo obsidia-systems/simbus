@@ -17,6 +17,7 @@ from __future__ import annotations
 import asyncio
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager, suppress
+from importlib.metadata import version as get_version
 
 import structlog
 from fastapi import FastAPI
@@ -30,6 +31,11 @@ from simbus.settings import DeviceSettings
 from simbus.simulation.engine import SimulationEngine
 
 logger = structlog.get_logger(__name__)
+
+try:
+    _SIMBUS_VERSION = get_version("simbus")
+except Exception:  # pragma: no cover
+    _SIMBUS_VERSION = "0.1.0"
 
 
 @asynccontextmanager
@@ -121,7 +127,7 @@ def create_app(settings: DeviceSettings | None = None) -> FastAPI:
 
     _app = FastAPI(
         title="simbus",
-        version="0.0.1",
+        version=_SIMBUS_VERSION,
         description="Industrial Field Device Simulator — device control API",
         lifespan=lifespan,
     )

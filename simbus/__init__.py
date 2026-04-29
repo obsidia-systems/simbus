@@ -1,3 +1,8 @@
 """Simbus — Industrial Field Device Simulator."""
 
-__version__ = "0.0.1"
+from importlib.metadata import version as get_version
+
+try:
+    __version__ = get_version("simbus")
+except Exception:  # pragma: no cover
+    __version__ = "0.1.0"
