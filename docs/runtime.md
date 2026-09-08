@@ -37,13 +37,17 @@ map. It MUST NOT auto-run scenarios.
 `simbus check` is the same binary without starting those tasks. `check` MUST
 take an explicit path (it does not imply the default template).
 
+`simbus ctl` MUST NOT load a device or start tasks. It is an HTTP client
+([control.md](control.md) §4).
+
 ---
 
 ## 2. Boot sequence
 
 1. Parse arguments. `check` short-circuits here (no tracing subscriber, no
    servers).
-2. `--tick` MUST be > 0.
+2. `--tick` MUST be > 0. `--time-scale` MUST be > 0. `--tick-health` and
+   `--shutdown-timeout` MUST be ≥ 0.
 3. Load the document:
    1. `--file` / `SIMBUS_YAML_PATH` if set.
    2. Else `devices/builtin/default.yaml` relative to the process cwd, if that
@@ -83,6 +87,7 @@ flowchart TB
 ```text
 simbus [OPTIONS]
 simbus check <FILE>
+simbus ctl [CONNECT] <COMMAND>
 ```
 
 | Invocation | Effect |
@@ -90,6 +95,7 @@ simbus check <FILE>
 | `simbus` | Boot the default template (cwd file, else embedded). |
 | `simbus --file devices/builtin/generic-ups.yaml` | Boot that template. |
 | `simbus check path.yaml` | Parse, validate, print summary, exit 0/1. No servers. |
+| `simbus ctl status` | HTTP client of an already-running process ([control.md](control.md) §4). MUST NOT boot a device. |
 
 `check` MUST accept unimplemented protocol bindings (valid syntax). Boot MUST
 NOT.
@@ -107,7 +113,10 @@ All settings use the `SIMBUS_` prefix when set via the environment.
 | `--name` / `-n` | `SIMBUS_DEVICE_NAME` | YAML `name` | Display name only |
 | `--api-port` | `SIMBUS_API_PORT` | `8000` | HTTP listen port |
 | `--host` | `SIMBUS_API_HOST` | `0.0.0.0` | HTTP bind address |
-| `--tick` | `SIMBUS_TICK_INTERVAL` | `1.0` | Tick period (seconds). MUST be > 0. Not a YAML field |
+| `--tick` | `SIMBUS_TICK_INTERVAL` | `1.0` | Wall sample period (seconds). MUST be > 0. Not a YAML field |
+| `--time-scale` | `SIMBUS_TIME_SCALE` | `1.0` | Simulation seconds per wall second. MUST be > 0. Boot-only |
+| `--tick-health` | `SIMBUS_TICK_HEALTH_LOG_INTERVAL` | `0` | Seconds between `simulation tick health` logs. `0` disables. MUST be ≥ 0 |
+| `--shutdown-timeout` | `SIMBUS_SHUTDOWN_TIMEOUT` | `5.0` | Drain wait (seconds) after SIGINT/SIGTERM. `0` aborts immediately. MUST be ≥ 0 |
 | `--seed` | `SIMBUS_SEED` | random | RNG seed; mixed with device identity |
 | `--api-key` | `SIMBUS_API_KEY` | — | If set, write endpoints require `x-api-key` or `Bearer` |
 | `--cors-origins` | `SIMBUS_CORS_ORIGINS` | `*` | Comma-separated origins |
@@ -117,8 +126,21 @@ There is no `SIMBUS_MODBUS_HOST` in this version.
 
 There is no `--type` / `SIMBUS_DEVICE_TYPE`.
 
-Tick interval is a **process** setting. Live changes go through
+`--tick` is the **wall** wait between samples. Live changes go through
 `PATCH /simulation` ([control.md](control.md)), not a second YAML.
+`--time-scale` is boot-only in this version; it is not a PATCH field.
+
+`dt` passed to `Device::tick` MUST be `tick_interval × time_scale`.
+Default scale `1` is 1:1 (same as before this split). Scale `60` with
+`--tick 1` advances one simulation minute per wall second. Changing
+`--tick` MUST NOT change the physical trajectory, only how often it is
+sampled. Changing `--time-scale` MUST.
+
+When `--tick-health` is > 0 the tick loop MUST emit
+`simulation tick health` at that wall period with:
+`tick_interval`, `time_scale`, `tick_duration_ms`, `loop_drift_ms`,
+`sse_subscribers`, `active_faults`, `uptime_s`. The engine MUST NOT emit
+this log.
 
 ---
 
@@ -130,17 +152,12 @@ Tick interval is a **process** setting. Live changes go through
 | Modbus TCP | `modbus::serve` | Same |
 | HTTP | `control::serve` | Same |
 
-`tick_interval` (seconds) is both the wait between ticks and `dt` passed to
-the engine, so wall clock and simulation time are 1:1. The tick loop reads
+The tick loop sleeps `tick_interval` (wall seconds) and passes
+`dt = tick_interval × time_scale` to the engine. It MUST re-read
 `tick_interval` every iteration so a PATCH takes effect on the next wait.
 Missed ticks use tokio `Delay` (catch up without bursting a backlog of ticks).
 After each `tick(dt)` the runtime MUST publish the snapshot on the control
 plane `watch` channel (`GET /registers/stream`).
-
-This version does **not** drain in-flight Modbus or HTTP connections on
-shutdown. Tasks are aborted. That is acceptable for a lab simulator; it MUST
-be documented here. A future graceful drain MUST be specified in this file
-before it is implemented.
 
 ---
 
@@ -151,12 +168,24 @@ On Unix the process MUST treat **SIGINT** and **SIGTERM** as shutdown. Docker
 
 On non-Unix platforms, SIGINT (`ctrl_c`) is sufficient.
 
-Shutdown log: `simbus stopping`. Exit code 0.
+Shutdown log: `simbus stopping`. Then:
+
+1. Stop accepting new HTTP and Modbus TCP connections (axum graceful
+   shutdown; tokio-modbus `serve_until`).
+2. Do not start another tick. The in-flight `tick(dt)` (synchronous, short)
+   MAY finish.
+3. Wait up to `--shutdown-timeout` for in-flight HTTP to finish.
+4. Abort whatever is still running (including `GET /registers/stream`).
+5. Exit 0.
+
+Timeout `0` skips the wait (abort immediately). Long-lived SSE is not
+required to drain; it is cut at step 4 if it outlives the timeout.
 
 If Modbus or the API task ends without a shutdown signal, the process MUST
 exit non-zero so the supervisor (Compose, systemd) can restart it. Logging
 the error and leaving the tick running is not enough: `/readyz` would lie
-and SCADA would see a half-dead device.
+and SCADA would see a half-dead device. Unexpected death MUST abort the
+other tasks without waiting for the drain timeout.
 
 ```mermaid
 sequenceDiagram
@@ -167,11 +196,15 @@ sequenceDiagram
     participant MB as modbus task
     participant HTTP as control task
     OS->>RT: SIGTERM
-    RT->>T: abort
-    RT->>MB: abort
-    RT->>HTTP: abort
+    RT->>RT: log simbus stopping
+    RT->>HTTP: stop accept, drain in-flight
+    RT->>MB: stop accept
+    RT->>T: stop after current tick
+    Note over RT: wait up to shutdown-timeout
+    RT->>T: abort leftover
+    RT->>MB: abort leftover
+    RT->>HTTP: abort leftover
     RT-->>OS: exit 0
-    Note over RT: No drain of in-flight connections
 ```
 
 ---

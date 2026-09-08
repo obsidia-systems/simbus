@@ -6,7 +6,9 @@ Modbus TCP field plane for one `engine` device. Contract:
 FC1–FC4 / 5 / 6 / 15 / 16. A range that includes an unimplemented address
 is exception 02. Quantity 0 or above the spec max is exception 03. Each PDU
 address is a 16-bit register. Native TCP does not filter on unit id.
-RTU / TLS are specified in [`docs/spec.md`](../../docs/spec.md) and not served.
+`serve` stops accepting when the runtime shutdown future resolves
+(`serve_until`). RTU / TLS are specified in [`docs/spec.md`](../../docs/spec.md)
+and not served.
 
 ## Tests
 

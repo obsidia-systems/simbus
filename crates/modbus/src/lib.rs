@@ -130,12 +130,13 @@ fn exception(err: DeviceError) -> ExceptionCode {
     }
 }
 
-/// Listen for Modbus TCP until the task is cancelled.
+/// Listen for Modbus TCP until `shutdown` resolves (stop accepting).
 pub async fn serve(
     device: Arc<Device>,
     port: u16,
     unit_id: u8,
     ready: Arc<AtomicBool>,
+    shutdown: impl std::future::Future<Output = ()> + Send + Sync + 'static,
 ) -> io::Result<()> {
     let addr = SocketAddr::from(([0, 0, 0, 0], port));
     let listener = TcpListener::bind(addr).await?;
@@ -154,7 +155,9 @@ pub async fn serve(
         tracing::error!(error = %err, "modbus server error");
     };
 
-    server.serve(&on_connected, on_error).await?;
+    let _ = server
+        .serve_until(&on_connected, on_error, shutdown)
+        .await?;
     ready.store(false, Ordering::SeqCst);
     Ok(())
 }

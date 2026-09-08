@@ -12,17 +12,6 @@ write the doc before the code.
 
 ---
 
-## Runtime
-
-| Item | Notes |
-| --- | --- |
-| Tick health log | No `simulation tick health` / `SIMBUS_TICK_HEALTH_LOG_INTERVAL` in this version. Specify in [runtime.md](runtime.md) first. |
-| Time acceleration | Wall wait and `dt` are 1:1. A wall-period vs sim-`dt` split MUST be written into [runtime.md](runtime.md) first. |
-| Graceful drain | Shutdown aborts tick / Modbus / HTTP. Specify drain in [runtime.md](runtime.md) before implementing. |
-| `simbus` HTTP client subcommand | Session control is HTTP only. Specify in [control.md](control.md) first. |
-
----
-
 ## Control / engine (specified, not in this version)
 
 | Item | Notes |

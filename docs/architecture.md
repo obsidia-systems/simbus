@@ -95,10 +95,11 @@ unimplemented protocol bindings that `check` still accepts as syntax.
 ```mermaid
 flowchart TB
     start([simbus argv]) --> parse[Parse CLI and SIMBUS_*]
-    parse --> isCheck{subcommand check?}
-    isCheck -->|yes| loadCheck[Load explicit path]
+    parse --> isCheck{subcommand?}
+    isCheck -->|check| loadCheck[Load explicit path]
     loadCheck --> validate
-    isCheck -->|no| loadBoot[Load file, cwd default.yaml, or embedded]
+    isCheck -->|ctl| client[HTTP client, no boot]
+    isCheck -->|none| loadBoot[Load file, cwd default.yaml, or embedded]
     loadBoot --> validate[spec validate]
     validate --> unimplemented{unimplemented binding?}
     unimplemented -->|check| report[Print summary, exit 0]
@@ -176,8 +177,8 @@ stateDiagram-v2
     Failed --> [*]: exit non-zero
 ```
 
-Shutdown **aborts** tasks. There is no drain of in-flight Modbus or HTTP
-([runtime.md](runtime.md) §5–6).
+Shutdown **drains** then aborts leftover after `--shutdown-timeout`
+([runtime.md](runtime.md) §6).
 
 ---
 

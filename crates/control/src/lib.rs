@@ -45,6 +45,8 @@ pub struct AppState {
     pub scenario_task: Arc<Mutex<Option<JoinHandle<()>>>>,
     /// Tick snapshots for SSE (`GET /registers/stream`).
     pub snapshots: watch::Sender<Snapshot>,
+    /// Simulation seconds per wall second (`--time-scale`). Boot-only.
+    pub time_scale: f64,
 }
 
 impl AppState {
@@ -112,12 +114,13 @@ pub fn router(state: AppState, cors_origins: &[String]) -> Router {
         .with_state(state)
 }
 
-/// Bind and serve until cancelled.
+/// Bind and serve until `shutdown` resolves, then drain in-flight requests.
 pub async fn serve(
     state: AppState,
     host: &str,
     port: u16,
     cors_origins: &[String],
+    shutdown: impl std::future::Future<Output = ()> + Send + 'static,
 ) -> std::io::Result<()> {
     let app = router(state, cors_origins);
     let addr: SocketAddr = format!("{host}:{port}")
@@ -125,5 +128,7 @@ pub async fn serve(
         .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidInput, e))?;
     let listener = TcpListener::bind(addr).await?;
     info!(host, port, "api listening");
-    axum::serve(listener, app).await
+    axum::serve(listener, app)
+        .with_graceful_shutdown(shutdown)
+        .await
 }

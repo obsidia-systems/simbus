@@ -61,18 +61,20 @@ flowchart TB
 
 ## 2. Time
 
-`dt` is **simulation seconds**. The runtime today sleeps `tick_interval` and
-passes that same value as `dt`, so wall clock and simulation time are 1:1.
+`dt` is **simulation seconds**. The runtime sleeps `tick_interval` (wall
+seconds) and passes `dt = tick_interval × time_scale`
+([runtime.md](runtime.md) §4). Default `time_scale` is `1` (1:1).
 
-There is **no** time acceleration in this version. Setting
-`SIMBUS_TICK_INTERVAL=60` samples once per minute; a 12-hour sine still takes
-12 wall hours. A future wall-period vs sim-`dt` split MUST be specified in
-[runtime.md](runtime.md) before the engine grows a second clock.
+`--tick` / `PATCH /simulation` is the sample period. A 12-hour sine still
+takes 12 simulation hours. With `--time-scale 60` those 12 simulation hours
+elapse in 12 wall minutes. The engine MUST NOT store a second clock;
+only the `dt` the caller passes matters.
 
 Periodic behaviors (`sinusoidal`, `sawtooth`, `step`) and fault TTLs use
 elapsed simulation time. Drift uses **engineering units per simulation
 second**, applied as `rate × dt`. Changing `--tick` MUST NOT change the
-physical trajectory, only how often it is sampled.
+physical trajectory, only how often it is sampled. Changing `--time-scale`
+MUST (same trajectory, faster or slower wall time).
 
 ---
 

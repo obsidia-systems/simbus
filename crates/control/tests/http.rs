@@ -32,6 +32,7 @@ fn tnh_state_with_key(api_key: Option<String>) -> AppState {
         modbus_ready: Arc::new(AtomicBool::new(true)),
         scenario_task: Arc::new(Mutex::new(None)),
         snapshots,
+        time_scale: 1.0,
     }
 }
 
@@ -60,6 +61,7 @@ async fn status_reports_device() {
     assert_eq!(json["name"], "Generic T&H Sensor");
     assert_eq!(json["modbus_port"], 5020);
     assert_eq!(json["simulation"], "running");
+    assert_eq!(json["time_scale"], 1.0);
 }
 
 #[tokio::test]

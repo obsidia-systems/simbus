@@ -90,6 +90,7 @@ curl http://localhost:8000/status
   "type": "tnh_sensor",
   "modbus_port": 502,
   "tick_interval": 1.0,
+  "time_scale": 1.0,
   "simulation": "running",
   "modbus_server": "listening"
 }
@@ -267,8 +268,9 @@ simulation:
 ```
 
 > [!NOTE]
-> Tick interval is the sample period. Wall clock and simulation time are 1:1
-> (`SIMBUS_TICK_INTERVAL=60` ticks once per minute). See [docs/simulation.md](docs/simulation.md).
+> `--tick` is the wall sample period. `--time-scale` (default `1`) is simulation
+> seconds per wall second. See [docs/runtime.md](docs/runtime.md) and
+> [docs/simulation.md](docs/simulation.md).
 
 ---
 
@@ -301,7 +303,7 @@ Normative route list: [docs/control.md](docs/control.md). Interactive docs at
 
 | Method | Endpoint | Description |
 | --- | --- | --- |
-| `GET` | `/status` | Name, type, listen Modbus port, tick, `running`/`stopped`, Modbus `listening`/`stopped` |
+| `GET` | `/status` | Name, type, listen Modbus port, tick, `time_scale`, `running`/`stopped`, Modbus `listening`/`stopped` |
 | `GET` | `/config` | Contract snapshot — map, `spec_version`, bundled scenarios |
 | `GET` | `/healthz` | Liveness (200 if the HTTP task is up) |
 | `GET` | `/readyz` | 200 when Modbus is listening and `is_running`; else 503 |
@@ -587,11 +589,15 @@ All settings use the `SIMBUS_` prefix and can be set via environment variables o
 | `SIMBUS_MODBUS_PORT` | device YAML default | Override Modbus TCP listen port |
 | `SIMBUS_API_HOST` | `0.0.0.0` | REST API bind address |
 | `SIMBUS_API_PORT` | `8000` | REST API listen port |
-| `SIMBUS_TICK_INTERVAL` | `1.0` | Simulation tick in seconds |
+| `SIMBUS_TICK_INTERVAL` | `1.0` | Wall sample period in seconds (`--tick`) |
+| `SIMBUS_TIME_SCALE` | `1.0` | Simulation seconds per wall second (`--time-scale`) |
+| `SIMBUS_TICK_HEALTH_LOG_INTERVAL` | `0` | Seconds between `simulation tick health` logs (`0` = off) |
+| `SIMBUS_SHUTDOWN_TIMEOUT` | `5.0` | Drain wait after SIGINT/SIGTERM (`0` = abort immediately) |
 | `SIMBUS_SEED` | — | RNG seed for reproducible output |
 | `SIMBUS_DEVICE_NAME` | — | Override the device name from YAML |
 | `SIMBUS_API_KEY` | — | If set, write endpoints require `x-api-key` or `Bearer` |
 | `SIMBUS_CORS_ORIGINS` | `*` | Comma-separated CORS origins (`*` for development) |
+| `SIMBUS_CTL_URL` | `http://127.0.0.1:8000` | Base URL for `simbus ctl` |
 
 **`.env` example:**
 
@@ -615,9 +621,7 @@ Typical events include:
 - `api listening` / `modbus server listening`
 - `fault injected` / `fault expired` / `faults cleared` / `simulation reset`
 - `simulation base changed` / `alarm activated` / `alarm cleared` / `discrete changed`
-
-There is no periodic `simulation tick health` log in this version
-([docs/debt.md](docs/debt.md)).
+- `simulation tick health` when `SIMBUS_TICK_HEALTH_LOG_INTERVAL` is > 0 (`tick_interval`, `time_scale`, `tick_duration_ms`, `loop_drift_ms`, `sse_subscribers`, `active_faults`, `uptime_s`)
 
 ```bash
 RUST_LOG=info cargo run -p runtime -- --file devices/builtin/generic-tnh-sensor.yaml
@@ -694,6 +698,7 @@ cargo run -p runtime --                                          # default templ
 cargo run -p runtime -- --file devices/builtin/generic-ups.yaml --port 502 --api-port 8000
 cargo run -p runtime -- --file devices/community/papouch-th2e.yaml --port 512 --api-port 8000
 cargo run -p runtime -- check devices/community/papouch-th2e.yaml
+cargo run -p runtime -- ctl status
 ```
 
 OpenAPI UI: [http://localhost:8000/docs](http://localhost:8000/docs)
@@ -766,7 +771,7 @@ timeline
     v0.2 — Scenarios : Playback API, recipes later moved into device YAML
     v0.3 — Rust workspace : this tree — tokio-modbus, axum, file-only boot, healthz/readyz/metrics
     Specified not served : MQTT Sparkplug, SNMP v2c, BACnet/IP, OPC UA, Modbus RTU/TLS
-    Ops debt : time acceleration, pause, tick health log, graceful drain
+    Ops debt : pause, scenario upload
 ```
 
 Unimplemented protocol **syntax** is already valid YAML (`simbus check` notes it;

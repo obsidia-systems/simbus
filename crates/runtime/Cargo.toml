@@ -22,6 +22,8 @@ clap = { workspace = true }
 control = { workspace = true }
 engine = { workspace = true }
 modbus = { workspace = true }
+reqwest = { workspace = true }
+serde_json = { workspace = true }
 spec = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }

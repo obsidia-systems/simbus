@@ -80,7 +80,7 @@ GET (including SSE) is not keyed. Missing/wrong key on a write MUST 401.
 
 | Method | Path | Notes |
 | --- | --- | --- |
-| `GET` | `/status` | Live: name, type, **listen** Modbus port, tick, `running`/`stopped`, Modbus `listening`/`stopped` |
+| `GET` | `/status` | Live: name, type, **listen** Modbus port, tick, `time_scale`, `running`/`stopped`, Modbus `listening`/`stopped` |
 | `GET` | `/config` | Document snapshot: map, `spec_version`, endianness, YAML `modbus.default_port`, bundled scenarios |
 | `GET` | `/healthz` | Liveness (always 200 if the task is up) |
 | `GET` | `/readyz` | 200 when Modbus is listening **and** `is_running`; else 503 |
@@ -141,9 +141,11 @@ MUST 404 (not a silent no-op).
 
 ### Scenarios
 
-Catalog = `scenarios:` in the loaded document. Playback uses **wall clock**
-from `POST /run`. In this version wall clock and simulation time are 1:1
-([simulation.md](simulation.md) §2), so `at:` matches tick time.
+Catalog = `scenarios:` in the loaded document. `at:` is **simulation
+seconds** from `POST /run`. The HTTP layer sleeps
+`wall = at / time_scale` ([runtime.md](runtime.md) §4). Default scale `1`
+keeps wall and `at:` 1:1. `elapsed_s` on `/scenarios/active` is simulation
+seconds (`wall_elapsed × time_scale`).
 
 | Method | Path | Notes |
 | --- | --- | --- |
@@ -166,9 +168,44 @@ An id from another device MUST 404 on this process.
 
 ## 4. CLI of the device
 
-The `simbus` binary **is** the device. Flags (`--file`, `--port`, `--tick`,
-`--seed`, …) apply at boot. Session control is this HTTP API (or OpenAPI).
-A future `simbus` client subcommand MUST call these same routes.
+The `simbus` binary **is** the device when invoked without a subcommand.
+Flags (`--file`, `--port`, `--tick`, `--time-scale`, `--seed`, …) apply at
+boot.
+
+`simbus ctl` is an HTTP **client** of a process that is already listening.
+It MUST call the routes in §3. It MUST NOT load YAML, start Modbus, or
+start the tick loop.
+
+| Flag | Env | Default |
+| --- | --- | --- |
+| `--url` | `SIMBUS_CTL_URL` | `http://127.0.0.1:8000` |
+| `--api-key` | `SIMBUS_API_KEY` | — |
+
+Writes send `x-api-key` when `--api-key` is set (same header as a GUI).
+Stdout is the response body (pretty JSON when the body is JSON). Exit `0`
+on 2xx, `1` otherwise.
+
+| Command | Route |
+| --- | --- |
+| `simbus ctl status` | `GET /status` |
+| `simbus ctl config` | `GET /config` |
+| `simbus ctl healthz` | `GET /healthz` |
+| `simbus ctl readyz` | `GET /readyz` |
+| `simbus ctl metrics` | `GET /metrics` |
+| `simbus ctl registers` | `GET /registers` |
+| `simbus ctl set <addr> --real-value` / `--value` [`--input`] | `PATCH /registers/{addr}` or `/registers/input/{addr}` |
+| `simbus ctl coil <addr> --value` [`--discrete`] | `PATCH /registers/coils/{addr}` or `/registers/discrete/{addr}` |
+| `simbus ctl faults` | `GET /faults` |
+| `simbus ctl fault --type …` | `POST /faults` |
+| `simbus ctl clear-faults` | `DELETE /faults` |
+| `simbus ctl tick --interval 0.5` | `PATCH /simulation` |
+| `simbus ctl reset` | `POST /simulation/reset` |
+| `simbus ctl scenarios` | `GET /scenarios` |
+| `simbus ctl run <id>` | `POST /scenarios/{id}/run` |
+| `simbus ctl active` | `GET /scenarios/active` |
+| `simbus ctl stop` | `POST /scenarios/stop` |
+
+There is no `simbus ctl` for `GET /registers/stream`. Use curl `-N` or a GUI.
 
 ---
 

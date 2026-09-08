@@ -7,8 +7,9 @@ faults, scenarios, SSE). Transport is HTTP. Contract:
 Field plane: [`docs/modbus.md`](../../docs/modbus.md).
 
 Writes may be gated by `SIMBUS_API_KEY`. Scenario catalog comes from the
-loaded device spec. SSE (`GET /registers/stream`) follows engine ticks via
-a `watch` channel filled by the runtime.
+loaded device spec. Scenario `at:` sleeps `at / time_scale` of wall clock.
+SSE (`GET /registers/stream`) follows engine ticks via a `watch` channel
+filled by the runtime. `/status` includes `time_scale`.
 
 ## Tests
 

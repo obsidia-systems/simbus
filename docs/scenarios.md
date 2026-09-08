@@ -53,8 +53,9 @@ curl http://localhost:8000/scenarios/active
 curl -X POST http://localhost:8000/scenarios/stop
 ```
 
-The runner sorts steps by `at` and applies them on a wall-clock timeline
-without blocking the tick loop. Step types: `set_register`, `inject_fault`,
+The runner sorts steps by `at` (simulation seconds) and sleeps
+`at / time_scale` of wall clock without blocking the tick loop. Default
+scale is 1 (1:1). Step types: `set_register`, `inject_fault`,
 `set_coil`, `set_tick_interval` — see spec.md.
 
 ---

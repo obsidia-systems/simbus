@@ -23,6 +23,7 @@ pub async fn get_status(State(state): State<AppState>) -> Json<StatusResponse> {
         device_type: spec.device_type.clone(),
         modbus_port: state.modbus_port,
         tick_interval: state.device.tick_interval(),
+        time_scale: state.time_scale,
         simulation: if state.device.is_running() {
             "running"
         } else {
@@ -107,7 +108,8 @@ pub async fn metrics(State(state): State<AppState>) -> String {
     let snap = state.device.snapshot();
     format!(
         "# HELP simbus_running 1 if the simulation loop is running\n# TYPE simbus_running gauge\nsimbus_running {}\n\
-         # HELP simbus_tick_interval_seconds Configured tick interval\n# TYPE simbus_tick_interval_seconds gauge\nsimbus_tick_interval_seconds {}\n\
+         # HELP simbus_tick_interval_seconds Wall sample period\n# TYPE simbus_tick_interval_seconds gauge\nsimbus_tick_interval_seconds {}\n\
+         # HELP simbus_time_scale Simulation seconds per wall second\n# TYPE simbus_time_scale gauge\nsimbus_time_scale {}\n\
          # HELP simbus_active_faults Active fault count\n# TYPE simbus_active_faults gauge\nsimbus_active_faults {}\n\
          # HELP simbus_holding_registers Holding register word count\n# TYPE simbus_holding_registers gauge\nsimbus_holding_registers {}\n\
          # HELP simbus_input_registers Input register word count\n# TYPE simbus_input_registers gauge\nsimbus_input_registers {}\n\
@@ -116,6 +118,7 @@ pub async fn metrics(State(state): State<AppState>) -> String {
          # HELP simbus_sse_subscribers Live GET /registers/stream receivers\n# TYPE simbus_sse_subscribers gauge\nsimbus_sse_subscribers {}\n",
         i32::from(state.device.is_running()),
         state.device.tick_interval(),
+        state.time_scale,
         state.device.faults().len(),
         snap.holding.len(),
         snap.input.len(),

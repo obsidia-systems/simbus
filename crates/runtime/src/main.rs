@@ -2,10 +2,12 @@
 
 #![allow(missing_docs)]
 
+mod ctl;
+
 use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, bail};
 use clap::{Args, Parser, Subcommand};
@@ -41,6 +43,8 @@ enum Command {
         /// Path to the device YAML file
         file: PathBuf,
     },
+    /// HTTP client for an already-running process
+    Ctl(ctl::CtlArgs),
 }
 
 #[derive(Args, Debug)]
@@ -60,9 +64,18 @@ struct RunArgs {
     /// Bind address for the REST API
     #[arg(long, env = "SIMBUS_API_HOST", default_value = "0.0.0.0")]
     host: String,
-    /// Simulation tick interval in seconds
+    /// Simulation tick interval in seconds (wall sample period)
     #[arg(long, env = "SIMBUS_TICK_INTERVAL", default_value_t = 1.0)]
     tick: f64,
+    /// Simulation seconds per wall second
+    #[arg(long, env = "SIMBUS_TIME_SCALE", default_value_t = 1.0)]
+    time_scale: f64,
+    /// Seconds between `simulation tick health` logs (`0` disables)
+    #[arg(long, env = "SIMBUS_TICK_HEALTH_LOG_INTERVAL", default_value_t = 0.0)]
+    tick_health: f64,
+    /// Drain wait after SIGINT/SIGTERM, in seconds (`0` aborts immediately)
+    #[arg(long, env = "SIMBUS_SHUTDOWN_TIMEOUT", default_value_t = 5.0)]
+    shutdown_timeout: f64,
     /// RNG seed for reproducible output
     #[arg(long, env = "SIMBUS_SEED")]
     seed: Option<u64>,
@@ -163,6 +176,9 @@ async fn main() -> Result<()> {
             }
         }
     }
+    if let Some(Command::Ctl(args)) = cli.command {
+        return ctl::run(args).await;
+    }
 
     tracing_subscriber::fmt()
         .with_env_filter(
@@ -174,6 +190,15 @@ async fn main() -> Result<()> {
     let args = cli.run;
     if args.tick <= 0.0 {
         bail!("--tick must be > 0");
+    }
+    if args.time_scale <= 0.0 {
+        bail!("--time-scale must be > 0");
+    }
+    if args.tick_health < 0.0 {
+        bail!("--tick-health must be >= 0");
+    }
+    if args.shutdown_timeout < 0.0 {
+        bail!("--shutdown-timeout must be >= 0");
     }
 
     let spec = load_spec(&args)?;
@@ -199,6 +224,7 @@ async fn main() -> Result<()> {
         modbus_ready: modbus_ready.clone(),
         scenario_task: Arc::new(Mutex::new(None)),
         snapshots: snapshots.clone(),
+        time_scale: args.time_scale,
     };
 
     info!(
@@ -207,40 +233,49 @@ async fn main() -> Result<()> {
         api_port = args.api_port,
         modbus_port,
         tick_interval = args.tick,
+        time_scale = args.time_scale,
         "simbus started"
     );
 
+    let (cancel_tx, _) = watch::channel(false);
+
     let tick_device = device.clone();
     let tick_snapshots = snapshots;
+    let tick_scale = args.time_scale;
+    let tick_health = args.tick_health;
+    let mut tick_shutdown = cancel_tx.subscribe();
     let mut tick_task = tokio::spawn(async move {
-        let mut ticker = interval(Duration::from_secs_f64(
-            tick_device.tick_interval().max(0.001),
-        ));
-        ticker.set_missed_tick_behavior(MissedTickBehavior::Delay);
-        loop {
-            ticker.tick().await;
-            let dt = tick_device.tick_interval();
-            let snap = tick_device.tick(dt);
-            let _ = tick_snapshots.send(snap);
-            let period = Duration::from_secs_f64(dt.max(0.001));
-            if ticker.period() != period {
-                ticker = interval(period);
-                ticker.set_missed_tick_behavior(MissedTickBehavior::Delay);
-            }
-        }
+        run_tick_loop(
+            tick_device,
+            tick_snapshots,
+            tick_scale,
+            tick_health,
+            &mut tick_shutdown,
+        )
+        .await;
     });
 
+    let mut modbus_shutdown = cancel_tx.subscribe();
     let modbus_device = device.clone();
     let mut modbus_task = tokio::spawn(async move {
-        if let Err(err) = modbus::serve(modbus_device, modbus_port, unit_id, modbus_ready).await {
+        let stop = async move {
+            let _ = modbus_shutdown.wait_for(|stop| *stop).await;
+        };
+        if let Err(err) =
+            modbus::serve(modbus_device, modbus_port, unit_id, modbus_ready, stop).await
+        {
             error!(error = %err, "modbus server failed");
         }
     });
 
+    let mut api_shutdown = cancel_tx.subscribe();
     let api_host = args.host.clone();
     let api_port = args.api_port;
     let mut api_task = tokio::spawn(async move {
-        if let Err(err) = control::serve(state, &api_host, api_port, &cors).await {
+        let stop = async move {
+            let _ = api_shutdown.wait_for(|stop| *stop).await;
+        };
+        if let Err(err) = control::serve(state, &api_host, api_port, &cors, stop).await {
             error!(error = %err, "api server failed");
         }
     });
@@ -263,14 +298,80 @@ async fn main() -> Result<()> {
 
     if graceful {
         info!("simbus stopping");
-    }
-    tick_task.abort();
-    modbus_task.abort();
-    api_task.abort();
-    if graceful {
+        let _ = cancel_tx.send(true);
+        if args.shutdown_timeout <= 0.0 {
+            tick_task.abort();
+            modbus_task.abort();
+            api_task.abort();
+        } else {
+            tokio::select! {
+                _ = async {
+                    let _ = tokio::join!(&mut tick_task, &mut modbus_task, &mut api_task);
+                } => {}
+                () = tokio::time::sleep(Duration::from_secs_f64(args.shutdown_timeout)) => {
+                    tick_task.abort();
+                    modbus_task.abort();
+                    api_task.abort();
+                }
+            }
+        }
         Ok(())
     } else {
-        bail!("a runtime task ended unexpectedly");
+        tick_task.abort();
+        modbus_task.abort();
+        api_task.abort();
+        bail!("a runtime task ended unexpectedly")
+    }
+}
+
+async fn run_tick_loop(
+    device: Arc<Device>,
+    snapshots: watch::Sender<engine::Snapshot>,
+    time_scale: f64,
+    health_interval: f64,
+    shutdown: &mut watch::Receiver<bool>,
+) {
+    let started = Instant::now();
+    let mut last_health = started;
+    let mut prev_wake: Option<Instant> = None;
+    let mut ticker = interval(Duration::from_secs_f64(device.tick_interval().max(0.001)));
+    ticker.set_missed_tick_behavior(MissedTickBehavior::Delay);
+    loop {
+        tokio::select! {
+            _ = ticker.tick() => {}
+            _ = shutdown.wait_for(|stop| *stop) => break,
+        }
+        if *shutdown.borrow() {
+            break;
+        }
+        let woke = Instant::now();
+        let wall = device.tick_interval().max(0.001);
+        let drift_ms = prev_wake.map_or(0.0, |prev| {
+            (woke.duration_since(prev).as_secs_f64() - wall) * 1000.0
+        });
+        prev_wake = Some(woke);
+        let t0 = Instant::now();
+        let snap = device.tick(wall * time_scale);
+        let tick_duration_ms = t0.elapsed().as_secs_f64() * 1000.0;
+        let _ = snapshots.send(snap);
+        if health_interval > 0.0 && last_health.elapsed().as_secs_f64() >= health_interval {
+            last_health = Instant::now();
+            info!(
+                tick_interval = wall,
+                time_scale,
+                tick_duration_ms,
+                loop_drift_ms = drift_ms,
+                sse_subscribers = snapshots.receiver_count(),
+                active_faults = device.faults().len(),
+                uptime_s = started.elapsed().as_secs_f64(),
+                "simulation tick health"
+            );
+        }
+        let period = Duration::from_secs_f64(wall);
+        if ticker.period() != period {
+            ticker = interval(period);
+            ticker.set_missed_tick_behavior(MissedTickBehavior::Delay);
+        }
     }
 }
 
@@ -340,6 +441,37 @@ registers:
         assert_eq!(cli.run.tick, 0.5);
         assert_eq!(cli.run.seed, Some(9));
         assert!(cli.run.file.is_some());
+    }
+
+    #[test]
+    fn parses_time_scale_and_health() {
+        let cli = Cli::try_parse_from([
+            "simbus",
+            "--time-scale",
+            "60",
+            "--tick-health",
+            "15",
+            "--shutdown-timeout",
+            "2",
+        ])
+        .unwrap();
+        assert_eq!(cli.run.time_scale, 60.0);
+        assert_eq!(cli.run.tick_health, 15.0);
+        assert_eq!(cli.run.shutdown_timeout, 2.0);
+        assert_eq!(cli.run.tick, 1.0);
+    }
+
+    #[test]
+    fn parses_ctl_status() {
+        let cli =
+            Cli::try_parse_from(["simbus", "ctl", "--url", "http://127.0.0.1:8001", "status"])
+                .unwrap();
+        match cli.command {
+            Some(Command::Ctl(args)) => {
+                assert!(format!("{args:?}").contains("8001"));
+            }
+            other => panic!("expected ctl, got {other:?}"),
+        }
     }
 
     #[test]

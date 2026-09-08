@@ -20,9 +20,12 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Device YAML is the boot contract: `spec_version`, bundled `scenarios:`,
   and protocol bindings (unimplemented protocols are valid syntax; boot refuses
   them). Normative language: `docs/spec.md`. Session API: `docs/control.md`.
-  Process: `docs/runtime.md` (SIGINT/SIGTERM, exit if a server task dies).
-- `docs/debt.md` — deferred work after closing spec, runtime, engine, control,
-  and modbus (tick health, time acceleration, pause).
+  Process: `docs/runtime.md` (SIGINT/SIGTERM, drain then abort leftover).
+- `simbus ctl` — HTTP client of an already-running process (`GET /status`,
+  PATCH registers, faults, scenarios). Does not boot a device.
+- `--time-scale` / `SIMBUS_TIME_SCALE` — simulation seconds per wall second.
+  `dt = tick_interval × time_scale`. Default `1` is 1:1.
+- `simulation tick health` logs when `SIMBUS_TICK_HEALTH_LOG_INTERVAL` is > 0.
 
 ### Changed
 
@@ -38,8 +41,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   simulation second, not per tick). `uint16` encode clamps instead of wrapping.
   Trigger `eq` matches within half a raw LSB. Freeze latches the cell at inject.
   `POST /simulation/reset` restores boot `RegState` and the RNG stream (same seeded trace). Seed
-  mix includes `identity`. Wall clock and simulation time stay 1:1; there is
-  no time acceleration in this version.
+  mix includes `identity`. Wall clock and simulation time stay 1:1 unless
+  `--time-scale` is set; there is no second clock in the engine.
 - Control plane (`docs/control.md`, crate `control` not `api`): session HTTP
   vs Modbus field plane. `GET /registers/stream` follows engine ticks and
   session writes. SSE is not covered by the 30 s request timeout. Faults
@@ -55,8 +58,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Tracing events from the Rust process: `simbus started` / `simbus stopping`,
   `api listening`, `modbus server listening`, `fault injected` / `expired` /
   `cleared`, `simulation reset`, `simulation base changed`, `alarm activated` /
-  `cleared`, `discrete changed`. There is no `register changed` event and no
-  periodic `simulation tick health` log.
+  `cleared`, `discrete changed`. There is no `register changed` event.
+  `simulation tick health` is emitted when `SIMBUS_TICK_HEALTH_LOG_INTERVAL` > 0.
+- SIGINT/SIGTERM: stop accepting, wait up to `SIMBUS_SHUTDOWN_TIMEOUT` (default
+  5 s), then abort leftover tasks (including SSE). Timeout `0` aborts immediately.
 
 ### Removed
 

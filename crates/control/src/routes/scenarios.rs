@@ -53,6 +53,7 @@ pub async fn run_scenario(
     }
     let generation = state.scenarios.begin(&spec);
     let runner = state.scenarios.clone();
+    let scale = state.time_scale.max(f64::EPSILON);
     let handle = tokio::spawn(async move {
         let mut steps = spec.steps.clone();
         steps.sort_by(|a, b| a.at().total_cmp(&b.at()));
@@ -61,7 +62,7 @@ pub async fn run_scenario(
             if !runner.is_running(generation) {
                 return;
             }
-            let target = Duration::from_secs_f64(step.at().max(0.0));
+            let target = Duration::from_secs_f64((step.at().max(0.0) / scale).max(0.0));
             let now = start.elapsed();
             if target > now {
                 sleep(target - now).await;
@@ -70,9 +71,10 @@ pub async fn run_scenario(
                 return;
             }
             runner.device().apply_step(step);
-            runner.note_step(generation, idx + 1, start.elapsed().as_secs_f64());
+            let sim_elapsed = start.elapsed().as_secs_f64() * scale;
+            runner.note_step(generation, idx + 1, sim_elapsed);
         }
-        runner.mark_completed(generation, start.elapsed().as_secs_f64());
+        runner.mark_completed(generation, start.elapsed().as_secs_f64() * scale);
     });
     *state.scenario_task.lock().unwrap() = Some(handle);
     Ok((
