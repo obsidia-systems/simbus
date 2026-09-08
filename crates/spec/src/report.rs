@@ -2,36 +2,6 @@
 
 use crate::types::{BindingSpec, CoilSpec, DeviceSpec, RegisterSpec};
 
-/// Directories searched for `--type <name>` (`<name>.yaml`).
-pub const DEVICE_SEARCH_DIRS: &[&str] = &["devices", "devices/builtin", "devices/community"];
-
-/// Resolve `--type` to a YAML path under the usual catalog folders.
-pub fn resolve_device_type(
-    type_key: &str,
-    extra_dir: Option<&std::path::Path>,
-) -> Result<std::path::PathBuf, crate::SpecError> {
-    let file = format!("{type_key}.yaml");
-    let mut searched = Vec::new();
-    if let Some(dir) = extra_dir {
-        let path = dir.join(&file);
-        searched.push(dir.display().to_string());
-        if path.is_file() {
-            return Ok(path);
-        }
-    }
-    for dir in DEVICE_SEARCH_DIRS {
-        let path = std::path::Path::new(dir).join(&file);
-        searched.push((*dir).to_owned());
-        if path.is_file() {
-            return Ok(path);
-        }
-    }
-    Err(crate::SpecError::DeviceNotFound {
-        requested: type_key.to_owned(),
-        searched: searched.join(", "),
-    })
-}
-
 /// Text report produced by `simbus check`.
 #[must_use]
 pub fn device_report(path: &str, spec: &DeviceSpec) -> String {

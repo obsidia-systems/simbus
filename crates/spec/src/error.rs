@@ -20,12 +20,4 @@ pub enum SpecError {
     /// Cross-references or value constraints failed.
     #[error("{0}")]
     Validation(String),
-    /// `--type` did not resolve to a YAML file.
-    #[error("device type '{requested}' not found. searched: {searched}")]
-    DeviceNotFound {
-        /// Requested `--type` key.
-        requested: String,
-        /// Directories that were searched.
-        searched: String,
-    },
 }

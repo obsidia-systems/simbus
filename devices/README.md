@@ -1,30 +1,24 @@
 # Device maps
 
-simbus is a generic measurement engine. Official maps are one generic device
-per type. Vendor-specific or site-specific maps live in `community/` and are
-accepted by pull request.
+simbus is a generic measurement engine. Official maps are **templates**: you
+point `simbus --file` at one of them. Vendor or site-specific maps live in
+`community/` and are accepted by pull request.
 
 | Folder | Who maintains it | What belongs here |
 | --- | --- | --- |
-| `builtin/` | Obsidia | Generic devices (T&H, UPS, PDU, CRAC, …) |
+| `builtin/default.yaml` | Obsidia | Zero-arg default: example channels, not a product |
+| `builtin/` | Obsidia | Product-shaped templates (T&H, UPS, PDU, CRAC, …) |
 | `community/` | Contributors | Named products, real register maps, lab-specific YAML |
 
-`--type <name>` looks for `<name>.yaml` in this order:
-
-1. `devices/`
-2. `devices/builtin/`
-3. `devices/community/`
-
-An extra directory can be prepended with `--devices-dir` / `SIMBUS_DEVICES_DIR`.
-
-Bundled scenarios belong **in the YAML** (`scenarios:`). See [docs/spec.md](../docs/spec.md).
-
-Validate a file without starting Modbus or the API:
-
 ```bash
+simbus                                          # default.yaml
+simbus --file devices/builtin/generic-ups.yaml
+simbus --file devices/community/papouch-th2e.yaml
 simbus check devices/community/my-device.yaml
 ```
 
-Exit `0` prints a configuration summary. Exit `1` prints the validation error.
-There is no Rust test per YAML file; CI runs `simbus check` on every file under
-`devices/`.
+Bundled scenarios belong **in the YAML** (`scenarios:`). See [docs/spec.md](../docs/spec.md).
+
+Exit `0` from `check` prints a configuration summary. Exit `1` prints the
+validation error. There is no Rust test per YAML file; CI runs `simbus check`
+on every file under `devices/`.

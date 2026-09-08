@@ -1,7 +1,11 @@
 # Community device maps
 
-Add a YAML here and open a pull request. Official generic types stay in
-`../builtin/`.
+Add a YAML here and open a pull request. Official templates stay in
+`../builtin/`. Run a community map with `--file`:
+
+```bash
+cargo run -p runtime -- --file devices/community/your-device.yaml
+```
 
 Before you open a PR:
 

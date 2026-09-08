@@ -17,7 +17,7 @@ pub use error::SpecError;
 pub use load::{
     load_device_from_path, load_device_from_str, load_scenario_from_path, load_scenario_from_str,
 };
-pub use report::{DEVICE_SEARCH_DIRS, device_report, resolve_device_type};
+pub use report::device_report;
 pub use scenario::{
     InjectFaultStep, ScenarioSpec, ScenarioStep, SetCoilStep, SetRegisterStep, SetTickIntervalStep,
 };

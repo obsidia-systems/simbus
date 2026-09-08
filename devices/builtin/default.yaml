@@ -1,0 +1,111 @@
+# Official default template. Mixed example channels for the simulation
+# engine — not a model of a specific field product. Copy this file or
+# point `--file` at another template under devices/builtin or devices/community.
+
+name: "Example Device"
+spec_version: 1
+version: "1.0"
+type: example
+description: >
+  Default simbus map when no YAML path is given. Several analog channels
+  with different behaviors, plus one alarm coil. Use this as a starting
+  point; official product-shaped templates live beside this file.
+
+modbus:
+  default_port: 502
+  unit_id: 1
+  endianness: big
+
+registers:
+  holding:
+    - address: 0
+      name: analog_a
+      description: "Noisy analog channel"
+      unit: "units"
+      default: 50.0
+      scale: 10
+      data_type: uint16
+      simulation:
+        behavior: gaussian_noise
+        std_dev: 1.5
+        drift:
+          enabled: true
+          rate: 0.02
+          bounds: [10.0, 90.0]
+
+    - address: 1
+      name: analog_b
+      description: "Slow cyclic analog channel"
+      unit: "units"
+      default: 40.0
+      scale: 10
+      data_type: uint16
+      simulation:
+        behavior: sinusoidal
+        period_hours: 6
+        amplitude: 8.0
+
+    - address: 2
+      name: analog_c
+      description: "Fixed analog channel until written"
+      unit: "units"
+      default: 12.5
+      scale: 10
+      data_type: uint16
+      simulation:
+        behavior: constant
+
+    - address: 3
+      name: accumulator
+      description: "Slowly increasing example counter"
+      unit: "counts"
+      default: 0.0
+      scale: 1
+      data_type: uint16
+      simulation:
+        behavior: drift
+        rate: 0.5
+        bounds: [0.0, 1000.0]
+
+  input:
+    - address: 0
+      name: sample_input
+      description: "Example input register (FC4)"
+      unit: "units"
+      default: 100.0
+      scale: 10
+      data_type: uint16
+      simulation:
+        behavior: gaussian_noise
+        std_dev: 0.4
+
+  coils:
+    - address: 0
+      name: analog_a_high
+      description: "analog_a above threshold"
+      default: false
+      trigger:
+        source_register: analog_a
+        condition: gt
+        threshold: 80.0
+
+alarms:
+  - name: Analog A high
+    severity: warning
+    trigger: analog_a_high
+
+scenarios:
+  - id: demo-spike
+    name: Demo spike
+    description: Brief spike on analog_a to exercise alarms and faults.
+    steps:
+      - at: 0
+        action: inject_fault
+        fault_type: spike
+        register_name: analog_a
+        value: 95.0
+        duration_s: 15
+      - at: 20
+        action: set_register
+        register_name: analog_a
+        value: 50.0

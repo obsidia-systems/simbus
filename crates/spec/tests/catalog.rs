@@ -112,26 +112,6 @@ registers:
 }
 
 #[test]
-fn resolve_type_from_extra_dir() {
-    let dir = std::env::temp_dir().join(format!("simbus-resolve-{}", std::process::id()));
-    std::fs::create_dir_all(&dir).unwrap();
-    let path = dir.join("demo.yaml");
-    std::fs::write(&path, tnh_yaml()).unwrap();
-    let found = spec::resolve_device_type("demo", Some(&dir)).unwrap();
-    assert_eq!(found, path);
-    std::fs::remove_file(&path).ok();
-    std::fs::remove_dir(&dir).ok();
-}
-
-#[test]
-fn resolve_unknown_type_lists_search_dirs() {
-    let err = spec::resolve_device_type("definitely-missing-xyz", None).unwrap_err();
-    let msg = err.to_string();
-    assert!(msg.contains("definitely-missing-xyz"), "{msg}");
-    assert!(msg.contains("devices/community"), "{msg}");
-}
-
-#[test]
 fn rejects_empty_scenario() {
     let err = spec::load_scenario_from_str(
         r"
