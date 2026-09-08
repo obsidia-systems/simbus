@@ -23,7 +23,7 @@ registers:
       data_type: uint16
       simulation:
         behavior: drift
-        rate: -0.005         # slow discharge (~1% per 200 ticks at 1 s/tick)
+        rate: -0.005         # slow discharge (~1% per 200 simulation seconds)
         bounds: [0.0, 100.0]
 
     - address: 1

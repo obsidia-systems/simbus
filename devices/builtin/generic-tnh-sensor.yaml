@@ -26,7 +26,7 @@ registers:
         std_dev: 0.3
         drift:
           enabled: true
-          rate: 0.01       # °C per tick
+          rate: 0.01       # °C per simulation second
           bounds: [18.0, 35.0]
 
     - address: 1

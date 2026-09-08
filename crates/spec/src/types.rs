@@ -218,7 +218,7 @@ pub struct DriftModifier {
     /// When false, the modifier is ignored.
     #[serde(default = "default_true")]
     pub enabled: bool,
-    /// Change per tick.
+    /// Change per simulation second (`rate × dt` in the engine).
     pub rate: f64,
     /// Inclusive `[min, max]` clamp.
     pub bounds: (f64, f64),
@@ -265,7 +265,7 @@ pub enum BehaviorSpec {
     },
     /// Linear drift of `state.base`.
     Drift {
-        /// Change per tick.
+        /// Change per simulation second (`rate × dt` in the engine).
         rate: f64,
         /// Inclusive clamp.
         bounds: (f64, f64),
