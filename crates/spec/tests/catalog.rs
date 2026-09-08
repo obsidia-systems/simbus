@@ -1,0 +1,259 @@
+use spec::{device_report, load_device_from_str};
+
+fn tnh_yaml() -> &'static str {
+    r"
+name: Generic T&H Sensor
+version: '1.0'
+type: tnh_sensor
+modbus:
+  default_port: 502
+  unit_id: 1
+  endianness: big
+registers:
+  holding:
+    - address: 0
+      name: temperature
+      default: 22.5
+      scale: 10
+      data_type: uint16
+      simulation:
+        behavior: gaussian_noise
+        std_dev: 0.3
+    - address: 1
+      name: humidity
+      default: 45.0
+      scale: 10
+      data_type: uint16
+      simulation:
+        behavior: sinusoidal
+        period_hours: 12
+        amplitude: 5.0
+  coils:
+    - address: 0
+      name: high_temp_alarm
+      default: false
+      trigger:
+        source_register: temperature
+        condition: gt
+        threshold: 30.0
+alarms:
+  - name: High temperature
+    severity: critical
+    trigger: high_temp_alarm
+"
+}
+
+#[test]
+fn check_report_summarizes_configuration() {
+    let spec = load_device_from_str(tnh_yaml()).unwrap();
+    let report = device_report("example.yaml", &spec);
+    assert!(report.starts_with("OK  example.yaml"));
+    assert!(report.contains("type         tnh_sensor"));
+    assert!(report.contains("modbus       port 502, unit 1, endianness big"));
+    assert!(report.contains("inferred"));
+    assert!(report.contains("holding 2"));
+    assert!(report.contains("temperature"));
+    assert!(report.contains("gaussian_noise"));
+    assert!(report.contains("high_temp_alarm"));
+    assert!(report.contains("High temperature"));
+}
+
+#[test]
+fn infers_modbus_tcp_binding() {
+    let spec = load_device_from_str(tnh_yaml()).unwrap();
+    assert!(spec.bindings.is_empty());
+    assert_eq!(spec.resolved_bindings().len(), 1);
+}
+
+#[test]
+fn rejects_unknown_trigger() {
+    let yaml = r"
+name: bad
+version: '1.0'
+type: bad
+modbus:
+  default_port: 502
+  unit_id: 1
+registers:
+  coils:
+    - address: 0
+      name: alarm
+      trigger:
+        source_register: missing
+        condition: gt
+        threshold: 1.0
+";
+    let err = spec::load_device_from_str(yaml).unwrap_err();
+    let msg = err.to_string();
+    assert!(msg.contains("unknown register"), "{msg}");
+}
+
+#[test]
+fn rejects_overlap_for_float32() {
+    let yaml = r"
+name: overlap
+version: '1.0'
+type: x
+modbus:
+  default_port: 502
+registers:
+  holding:
+    - address: 0
+      name: a
+      default: 1.0
+      data_type: float32
+    - address: 1
+      name: b
+      default: 2.0
+      data_type: uint16
+";
+    let err = spec::load_device_from_str(yaml).unwrap_err();
+    assert!(err.to_string().contains("overlaps"), "{err}");
+}
+
+#[test]
+fn resolve_type_from_extra_dir() {
+    let dir = std::env::temp_dir().join(format!("simbus-resolve-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("demo.yaml");
+    std::fs::write(&path, tnh_yaml()).unwrap();
+    let found = spec::resolve_device_type("demo", Some(&dir)).unwrap();
+    assert_eq!(found, path);
+    std::fs::remove_file(&path).ok();
+    std::fs::remove_dir(&dir).ok();
+}
+
+#[test]
+fn resolve_unknown_type_lists_search_dirs() {
+    let err = spec::resolve_device_type("definitely-missing-xyz", None).unwrap_err();
+    let msg = err.to_string();
+    assert!(msg.contains("definitely-missing-xyz"), "{msg}");
+    assert!(msg.contains("devices/community"), "{msg}");
+}
+
+#[test]
+fn rejects_empty_scenario() {
+    let err = spec::load_scenario_from_str(
+        r"
+name: empty
+description: none
+steps: []
+",
+    )
+    .unwrap_err();
+    assert!(err.to_string().contains("at least one step"), "{err}");
+}
+
+#[test]
+fn defaults_spec_version_to_one() {
+    let spec = load_device_from_str(tnh_yaml()).unwrap();
+    assert_eq!(spec.spec_version, spec::SPEC_VERSION);
+}
+
+#[test]
+fn rejects_unknown_spec_version() {
+    let yaml = r"
+name: future
+spec_version: 99
+version: '1.0'
+type: x
+modbus:
+  default_port: 502
+registers:
+  holding:
+    - address: 0
+      name: a
+      default: 1.0
+";
+    let err = spec::load_device_from_str(yaml).unwrap_err();
+    assert!(err.to_string().contains("spec_version"), "{err}");
+}
+
+#[test]
+fn embedded_scenario_must_reference_real_registers() {
+    let yaml = r"
+name: tnh
+version: '1.0'
+type: tnh_sensor
+modbus:
+  default_port: 502
+registers:
+  holding:
+    - address: 0
+      name: temperature
+      default: 22.5
+scenarios:
+  - id: heat-wave
+    name: Heat Wave
+    steps:
+      - at: 0
+        action: set_register
+        register_name: missing
+        value: 30.0
+";
+    let err = spec::load_device_from_str(yaml).unwrap_err();
+    assert!(err.to_string().contains("set_register"), "{err}");
+}
+
+#[test]
+fn embedded_scenario_is_part_of_the_contract() {
+    let yaml = r"
+name: tnh
+version: '1.0'
+type: tnh_sensor
+modbus:
+  default_port: 502
+registers:
+  holding:
+    - address: 0
+      name: temperature
+      default: 22.5
+scenarios:
+  - id: heat-wave
+    name: Heat Wave
+    description: Rise then spike.
+    steps:
+      - at: 0
+        action: set_register
+        register_name: temperature
+        value: 22.0
+      - at: 2
+        action: inject_fault
+        fault_type: spike
+        register_name: temperature
+        value: 42.0
+        duration_s: 10
+";
+    let spec = load_device_from_str(yaml).unwrap();
+    assert_eq!(spec.scenarios.len(), 1);
+    assert_eq!(spec.scenarios[0].id, "heat-wave");
+    let report = device_report("tnh.yaml", &spec);
+    assert!(report.contains("spec_version 1"));
+    assert!(report.contains("heat-wave"));
+}
+
+#[test]
+fn snmp_binding_is_valid_syntax_but_unimplemented() {
+    let yaml = r"
+name: snmp-box
+version: '1.0'
+type: meter
+modbus:
+  default_port: 502
+bindings:
+  - protocol: snmp-v2c
+    port: 161
+    community: public
+registers:
+  holding:
+    - address: 0
+      name: watts
+      default: 1.0
+";
+    let spec = load_device_from_str(yaml).unwrap();
+    let unimplemented = spec.unimplemented_protocols();
+    assert_eq!(unimplemented.len(), 1);
+    assert!(!unimplemented[0].is_implemented());
+    let report = device_report("snmp.yaml", &spec);
+    assert!(report.contains("specified, not implemented"));
+}
