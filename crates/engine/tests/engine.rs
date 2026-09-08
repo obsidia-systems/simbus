@@ -544,3 +544,22 @@ fn write_coils_rejects_unmapped() {
     ));
     assert_eq!(device.snapshot().coils.get(&0), Some(&false));
 }
+
+#[test]
+fn tick_is_noop_while_paused() {
+    let device = Device::new(tnh_spec(), Some(1), 1.0);
+    device.inject_fault(engine::ActiveFault::new(
+        FaultType::Spike,
+        Some("temperature".into()),
+        Some(42.0),
+        2.0,
+    ));
+    device.set_running(false);
+    let paused = device.tick(1.0);
+    assert_eq!(paused.holding.get(&0), Some(&225));
+    assert_eq!(device.faults().len(), 1);
+    device.set_running(true);
+    let running = device.tick(1.0);
+    assert_eq!(running.holding.get(&0), Some(&420));
+    assert_eq!(device.faults().len(), 1);
+}

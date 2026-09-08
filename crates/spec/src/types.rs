@@ -740,96 +740,114 @@ impl DeviceSpec {
             }
         }
 
-        self.validate_scenarios(&names, &coil_names)?;
+        self.validate_scenarios()?;
         Ok(())
     }
 
-    fn validate_scenarios(
-        &self,
-        register_names: &std::collections::HashSet<String>,
-        coil_names: &std::collections::HashSet<&str>,
-    ) -> Result<(), SpecError> {
+    /// Validate one scenario against this device's register and coil names.
+    ///
+    /// Used for YAML `scenarios:` and for session install (`POST /scenarios`).
+    pub fn validate_guest_scenario(&self, scenario: &ScenarioSpec) -> Result<(), SpecError> {
+        if scenario.id.is_empty() {
+            return Err(SpecError::Validation(format!(
+                "scenario '{}': embedded scenarios must set id",
+                scenario.name
+            )));
+        }
+        if !scenario_id_ok(&scenario.id) {
+            return Err(SpecError::Validation(format!(
+                "scenario '{}': id must be lowercase kebab-case (got '{}')",
+                scenario.name, scenario.id
+            )));
+        }
+        scenario.validate()?;
+        let register_names: std::collections::HashSet<String> = self
+            .registers
+            .holding
+            .iter()
+            .chain(&self.registers.input)
+            .map(|r| r.name.clone())
+            .collect();
+        let coil_names: std::collections::HashSet<&str> = self
+            .registers
+            .coils
+            .iter()
+            .chain(&self.registers.discrete)
+            .map(|c| c.name.as_str())
+            .collect();
+        let ctx = format!("scenario '{}'", scenario.id);
+        for step in &scenario.steps {
+            match step {
+                ScenarioStep::SetRegister(s) => {
+                    let in_holding = self
+                        .registers
+                        .holding
+                        .iter()
+                        .any(|r| r.name == s.register_name);
+                    let in_input = self
+                        .registers
+                        .input
+                        .iter()
+                        .any(|r| r.name == s.register_name);
+                    let ok = match s.register_type.as_str() {
+                        "holding" => in_holding,
+                        "input" => in_input,
+                        _ => false,
+                    };
+                    if !ok {
+                        return Err(SpecError::Validation(format!(
+                            "{ctx}: set_register '{}' not found in {}",
+                            s.register_name, s.register_type
+                        )));
+                    }
+                }
+                ScenarioStep::SetCoil(s) => {
+                    if !coil_names.contains(s.coil.as_str()) {
+                        return Err(SpecError::Validation(format!(
+                            "{ctx}: set_coil '{}' not found",
+                            s.coil
+                        )));
+                    }
+                }
+                ScenarioStep::InjectFault(s) => {
+                    let Some(target) = s.register_name.as_deref() else {
+                        return Err(SpecError::Validation(format!(
+                            "{ctx}: inject_fault requires register_name"
+                        )));
+                    };
+                    match s.fault_type {
+                        FaultType::Alarm => {
+                            if !coil_names.contains(target) {
+                                return Err(SpecError::Validation(format!(
+                                    "{ctx}: inject_fault alarm target '{target}' is not a coil"
+                                )));
+                            }
+                        }
+                        _ => {
+                            if !register_names.contains(target) {
+                                return Err(SpecError::Validation(format!(
+                                    "{ctx}: inject_fault target '{target}' is not a register"
+                                )));
+                            }
+                        }
+                    }
+                }
+                ScenarioStep::SetTickInterval(_) => {}
+            }
+        }
+        Ok(())
+    }
+
+    fn validate_scenarios(&self) -> Result<(), SpecError> {
         let mut ids = std::collections::HashSet::new();
         for scenario in &self.scenarios {
-            if scenario.id.is_empty() {
-                return Err(SpecError::Validation(format!(
-                    "scenario '{}': embedded scenarios must set id",
-                    scenario.name
-                )));
-            }
-            if !scenario_id_ok(&scenario.id) {
-                return Err(SpecError::Validation(format!(
-                    "scenario '{}': id must be lowercase kebab-case (got '{}')",
-                    scenario.name, scenario.id
-                )));
-            }
             if !ids.insert(scenario.id.as_str()) {
                 return Err(SpecError::Validation(format!(
                     "duplicate scenario id '{}'",
                     scenario.id
                 )));
             }
-            scenario.validate()?;
-            let ctx = format!("scenario '{}'", scenario.id);
-            for step in &scenario.steps {
-                match step {
-                    ScenarioStep::SetRegister(s) => {
-                        let in_holding = self
-                            .registers
-                            .holding
-                            .iter()
-                            .any(|r| r.name == s.register_name);
-                        let in_input = self
-                            .registers
-                            .input
-                            .iter()
-                            .any(|r| r.name == s.register_name);
-                        let ok = match s.register_type.as_str() {
-                            "holding" => in_holding,
-                            "input" => in_input,
-                            _ => false,
-                        };
-                        if !ok {
-                            return Err(SpecError::Validation(format!(
-                                "{ctx}: set_register '{}' not found in {}",
-                                s.register_name, s.register_type
-                            )));
-                        }
-                    }
-                    ScenarioStep::SetCoil(s) => {
-                        if !coil_names.contains(s.coil.as_str()) {
-                            return Err(SpecError::Validation(format!(
-                                "{ctx}: set_coil '{}' not found",
-                                s.coil
-                            )));
-                        }
-                    }
-                    ScenarioStep::InjectFault(s) => {
-                        let Some(target) = s.register_name.as_deref() else {
-                            return Err(SpecError::Validation(format!(
-                                "{ctx}: inject_fault requires register_name"
-                            )));
-                        };
-                        match s.fault_type {
-                            FaultType::Alarm => {
-                                if !coil_names.contains(target) {
-                                    return Err(SpecError::Validation(format!(
-                                        "{ctx}: inject_fault alarm target '{target}' is not a coil"
-                                    )));
-                                }
-                            }
-                            _ => {
-                                if !register_names.contains(target) {
-                                    return Err(SpecError::Validation(format!(
-                                        "{ctx}: inject_fault target '{target}' is not a register"
-                                    )));
-                                }
-                            }
-                        }
-                    }
-                    ScenarioStep::SetTickInterval(_) => {}
-                }
-            }
+            self.validate_guest_scenario(scenario)?;
         }
         Ok(())
     }

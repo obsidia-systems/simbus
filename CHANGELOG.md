@@ -33,6 +33,12 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - `AGENTS.md` (how to change this repo), `llms.txt` (documentation map), and
   the Agent Skill `.agents/skills/simbus-device/` for writing device YAML
   (`npx skills add obsidia-systems/simbus@simbus-device`).
+- Pause/resume: `PATCH /simulation` `{"running": false}` (tick and scenario
+  `at:` freeze; Modbus still serves the last bank; `/readyz` is 503).
+  `simbus ctl pause` / `resume`.
+- `POST /scenarios` installs a session copy (JSON, same schema as the YAML).
+  `DELETE /scenarios/{id}` drops it. Bundled ids return 409.
+  `simbus ctl install` / `uninstall`.
 - Simplified GitFlow (`CONTRIBUTING.md`): feature PRs to `develop`; `main` is
   the last published tree. A `v*` tag on `main` publishes GHCR and native
   binaries via `dist` (linux amd64/arm64, macOS aarch64, shell installer).
@@ -69,7 +75,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   `devices/` README files.
 - Tracing events from the Rust process: `simbus started` / `simbus stopping`,
   `api listening`, `modbus server listening`, `fault injected` / `expired` /
-  `cleared`, `simulation reset`, `simulation base changed`, `alarm activated` /
+  `cleared`, `simulation reset`, `simulation paused` / `resumed`,
+  `simulation base changed`, `alarm activated` /
   `cleared`, `discrete changed`. There is no `register changed` event.
   `simulation tick health` is emitted when `SIMBUS_TICK_HEALTH_LOG_INTERVAL` > 0.
 - SIGINT/SIGTERM: stop accepting, wait up to `SIMBUS_SHUTDOWN_TIMEOUT` (default

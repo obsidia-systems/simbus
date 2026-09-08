@@ -78,6 +78,7 @@ pub async fn get_config(State(state): State<AppState>) -> Json<ConfigResponse> {
                 name: s.name.clone(),
                 description: s.description.clone(),
                 steps: s.steps.len(),
+                source: "bundled",
             })
             .collect(),
         registers: RegisterMapResponse {

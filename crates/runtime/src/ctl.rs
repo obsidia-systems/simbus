@@ -69,10 +69,18 @@ enum CtlCommand {
         #[arg(long)]
         interval: f64,
     },
+    /// PATCH /simulation {"running": false}
+    Pause,
+    /// PATCH /simulation {"running": true}
+    Resume,
     /// POST /simulation/reset
     Reset,
     /// GET /scenarios
     Scenarios,
+    /// POST /scenarios (JSON or YAML file parsed locally)
+    Install { file: std::path::PathBuf },
+    /// DELETE /scenarios/{id}
+    Uninstall { id: String },
     /// POST /scenarios/{id}/run
     Run { id: String },
     /// GET /scenarios/active
@@ -156,8 +164,35 @@ pub async fn run(args: CtlArgs) -> Result<()> {
             )
             .await
         }
+        CtlCommand::Pause => {
+            send(
+                Method::PATCH,
+                base,
+                "/simulation",
+                key,
+                Some(json!({ "running": false })),
+            )
+            .await
+        }
+        CtlCommand::Resume => {
+            send(
+                Method::PATCH,
+                base,
+                "/simulation",
+                key,
+                Some(json!({ "running": true })),
+            )
+            .await
+        }
         CtlCommand::Reset => send(Method::POST, base, "/simulation/reset", key, None).await,
         CtlCommand::Scenarios => get(base, "/scenarios", key).await,
+        CtlCommand::Install { file } => {
+            let body = load_install_body(&file)?;
+            send(Method::POST, base, "/scenarios", key, Some(body)).await
+        }
+        CtlCommand::Uninstall { id } => {
+            send(Method::DELETE, base, &format!("/scenarios/{id}"), key, None).await
+        }
         CtlCommand::Run { id } => {
             send(
                 Method::POST,
@@ -180,6 +215,15 @@ fn register_body(real_value: Option<f64>, value: Option<u16>) -> Result<Value> {
         (None, None) => bail!("provide --real-value or --value"),
         (Some(_), Some(_)) => bail!("--real-value and --value are mutually exclusive"),
     }
+}
+
+fn load_install_body(path: &std::path::Path) -> Result<Value> {
+    let text = std::fs::read_to_string(path).with_context(|| format!("read {}", path.display()))?;
+    if let Ok(value) = serde_json::from_str::<Value>(&text) {
+        return Ok(value);
+    }
+    let spec = spec::load_scenario_from_str(&text)?;
+    serde_json::to_value(spec).context("serialize scenario")
 }
 
 async fn get(base: &str, path: &str, api_key: Option<&str>) -> Result<()> {

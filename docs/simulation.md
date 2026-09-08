@@ -32,18 +32,21 @@ On every **tick** with `dt > 0` it MUST:
 5. Return a snapshot of the bank.
 
 `dt <= 0` MUST be a no-op (same snapshot, no time, no expiry).
+`is_running == false` (pause) MUST be the same no-op even when `dt > 0`.
+Resume continues from the frozen `elapsed_s` and fault `remaining_s`.
 
 Registers without `simulation:` are static: they keep `default` or whatever
 was last written. The engine MUST NOT overwrite them on tick.
 
-`is_running` is a status flag for `/status` and `/readyz`. Tick MUST NOT
-consult it. Pause is out of scope for this version.
+Pause is set from the control plane ([control.md](control.md)). The engine
+MUST consult `is_running` inside `tick`. The runtime MUST NOT publish an
+SSE tick frame for a skipped (paused) wait.
 
 ```mermaid
 flowchart TB
-    tick[tick dt] --> dtz{dt greater than 0?}
-    dtz -->|no| snap[Return snapshot]
-    dtz -->|yes| faults[Decrement fault TTLs]
+    tick[tick dt] --> paused{is_running and dt greater than 0?}
+    paused -->|no| snap[Return snapshot]
+    paused -->|yes| faults[Decrement fault TTLs]
     faults --> regs[For each holding and input]
     regs --> beh{has simulation?}
     beh -->|no| skip[Keep last written]

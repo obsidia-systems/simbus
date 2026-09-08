@@ -56,6 +56,7 @@ pub struct ScenarioInfo {
     pub name: String,
     pub description: String,
     pub steps: usize,
+    pub source: &'static str,
 }
 
 #[derive(Debug, Serialize)]
@@ -110,6 +111,7 @@ pub struct FaultResponse {
 #[derive(Debug, Deserialize)]
 pub struct SimulationPatchRequest {
     pub tick_interval: Option<f64>,
+    pub running: Option<bool>,
 }
 
 #[derive(Debug, Serialize)]

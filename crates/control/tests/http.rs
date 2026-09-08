@@ -165,6 +165,7 @@ async fn openapi_lists_session_routes() {
         "/simulation",
         "/simulation/reset",
         "/scenarios",
+        "/scenarios/{name}",
         "/scenarios/{name}/run",
     ] {
         assert!(paths.contains_key(path), "missing OpenAPI path {path}");
@@ -297,4 +298,102 @@ async fn readyz_unavailable_when_not_running() {
         .await
         .unwrap();
     assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+}
+
+#[tokio::test]
+async fn pause_and_resume_via_patch() {
+    let state = tnh_state();
+    let app = control::router(state.clone(), &["*".to_owned()]);
+    let paused = app
+        .clone()
+        .oneshot(json_request(
+            "PATCH",
+            "/simulation",
+            r#"{"running": false}"#,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(paused.status(), StatusCode::OK);
+    let body = paused.into_body().collect().await.unwrap().to_bytes();
+    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(json["running"], false);
+    assert!(!state.device.is_running());
+
+    let readyz = app
+        .clone()
+        .oneshot(Request::get("/readyz").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    assert_eq!(readyz.status(), StatusCode::SERVICE_UNAVAILABLE);
+
+    let resumed = app
+        .oneshot(json_request("PATCH", "/simulation", r#"{"running": true}"#))
+        .await
+        .unwrap();
+    assert_eq!(resumed.status(), StatusCode::OK);
+    assert!(state.device.is_running());
+}
+
+#[tokio::test]
+async fn install_session_scenario_and_reject_bundled_id() {
+    let app = app();
+    let created = app
+        .clone()
+        .oneshot(json_request(
+            "POST",
+            "/scenarios",
+            r#"{"id":"lab-spike","name":"Lab spike","steps":[{"action":"set_register","at":0,"register_name":"temperature","value":30.0}]}"#,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(created.status(), StatusCode::CREATED);
+
+    let listed = app
+        .clone()
+        .oneshot(Request::get("/scenarios").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    let body = listed.into_body().collect().await.unwrap().to_bytes();
+    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    let lab = json
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|s| s["id"] == "lab-spike")
+        .unwrap();
+    assert_eq!(lab["source"], "session");
+
+    let conflict = app
+        .clone()
+        .oneshot(json_request(
+            "POST",
+            "/scenarios",
+            r#"{"id":"heat-wave","name":"Nope","steps":[{"action":"set_register","at":0,"register_name":"temperature","value":30.0}]}"#,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(conflict.status(), StatusCode::CONFLICT);
+
+    let bad = app
+        .clone()
+        .oneshot(json_request(
+            "POST",
+            "/scenarios",
+            r#"{"id":"lab-bad","name":"Bad","steps":[{"action":"set_register","at":0,"register_name":"nope","value":1.0}]}"#,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(bad.status(), StatusCode::UNPROCESSABLE_ENTITY);
+
+    let removed = app
+        .oneshot(
+            Request::builder()
+                .method("DELETE")
+                .uri("/scenarios/lab-spike")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(removed.status(), StatusCode::NO_CONTENT);
 }

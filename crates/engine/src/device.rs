@@ -119,7 +119,7 @@ impl Device {
                 initial_rng: rng.clone(),
                 rng,
                 tick_interval,
-                running: false,
+                running: true,
             }),
         })
     }
@@ -143,9 +143,18 @@ impl Device {
         }
     }
 
-    /// Mark the simulation as running.
+    /// Pause (`false`) or resume (`true`) the simulation clock.
     pub fn set_running(&self, running: bool) {
-        self.inner.write().running = running;
+        let mut inner = self.inner.write();
+        if inner.running == running {
+            return;
+        }
+        inner.running = running;
+        if running {
+            info!(source = "api", "simulation resumed");
+        } else {
+            info!(source = "api", "simulation paused");
+        }
     }
 
     /// Whether the tick loop is marked running.
@@ -154,10 +163,10 @@ impl Device {
         self.inner.read().running
     }
 
-    /// Advance simulation by `dt` seconds. `dt <= 0` is a no-op.
+    /// Advance simulation by `dt` seconds. `dt <= 0` or pause is a no-op.
     pub fn tick(&self, dt: f64) -> Snapshot {
         let mut inner = self.inner.write();
-        if dt <= 0.0 {
+        if dt <= 0.0 || !inner.running {
             return inner.bank.snapshot();
         }
         tick_faults(&mut inner.faults, dt);

@@ -1,5 +1,6 @@
 //! Wall-clock-agnostic scenario playback.
 
+use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use parking_lot::Mutex;
@@ -53,6 +54,7 @@ pub struct ScenarioRunner {
     device: std::sync::Arc<Device>,
     status: Mutex<ScenarioStatus>,
     generation: AtomicU64,
+    session: Mutex<HashMap<String, ScenarioSpec>>,
 }
 
 impl ScenarioRunner {
@@ -69,6 +71,7 @@ impl ScenarioRunner {
                 elapsed_s: 0.0,
             }),
             generation: AtomicU64::new(0),
+            session: Mutex::new(HashMap::new()),
         }
     }
 
@@ -82,6 +85,28 @@ impl ScenarioRunner {
     #[must_use]
     pub fn status(&self) -> ScenarioStatus {
         self.status.lock().clone()
+    }
+
+    /// Session-installed scenarios (not in the YAML).
+    #[must_use]
+    pub fn session_scenarios(&self) -> Vec<ScenarioSpec> {
+        self.session.lock().values().cloned().collect()
+    }
+
+    /// Look up a session copy by id.
+    #[must_use]
+    pub fn session_scenario(&self, id: &str) -> Option<ScenarioSpec> {
+        self.session.lock().get(id).cloned()
+    }
+
+    /// Install or replace a session copy. Returns the previous copy if any.
+    pub fn install_session(&self, spec: ScenarioSpec) -> Option<ScenarioSpec> {
+        self.session.lock().insert(spec.id.clone(), spec)
+    }
+
+    /// Remove a session copy. Returns whether it existed.
+    pub fn remove_session(&self, id: &str) -> bool {
+        self.session.lock().remove(id).is_some()
     }
 
     /// Whether this playback generation should keep running.

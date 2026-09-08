@@ -21,7 +21,7 @@ Classified with [Diátaxis](https://diataxis.fr/) so each page has one job.
 | [control.md](control.md) | Reference | Session HTTP (not the field protocol) |
 | [simulation.md](simulation.md) | Reference | Tick, `state.base`, behaviors, faults, encode |
 | [scenarios.md](scenarios.md) | How-to | Run and author bundled scenarios |
-| [debt.md](debt.md) | Explanation | Specified as not this version |
+| [debt.md](debt.md) | Explanation | Specified as not this version (extra protocols) |
 
 Interactive HTTP reference: `GET /docs` on a running process (OpenAPI).
 That page is generated from `crates/control`; [control.md](control.md) is

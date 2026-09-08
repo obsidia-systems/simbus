@@ -21,6 +21,11 @@ Inside the device YAML, under `scenarios:`. Example: `heat-wave` on
 They are **not** loaded from a global `scenarios/` folder. That catalog does
 not exist in this repository. `default.yaml` ships `demo-spike`.
 
+A running process can also take a **session copy** (`POST /scenarios`, JSON
+with the same fields). It is RAM-only, validated against the loaded map, and
+gone when the process exits. Prefer putting recipes in the device YAML so
+`simbus check` sees them.
+
 `simbus check` validates every step against this device's registers and coils.
 A scenario that names `on_battery_alarm` on a UPS whose coil is `on_battery`
 MUST fail check — it MUST NOT fail silently at run time.
@@ -51,6 +56,9 @@ The process starts idle. Then:
 curl -X POST http://localhost:8000/scenarios/heat-wave/run
 curl http://localhost:8000/scenarios/active
 curl -X POST http://localhost:8000/scenarios/stop
+# pause the clock (scenario wall waits freeze too)
+curl -X PATCH http://localhost:8000/simulation -d '{"running": false}'
+curl -X PATCH http://localhost:8000/simulation -d '{"running": true}'
 ```
 
 The runner sorts steps by `at` (simulation seconds) and sleeps
@@ -67,4 +75,5 @@ scale is 1 (1:1). Step types: `set_register`, `inject_fault`,
 3. Run `simbus check path/to/device.yaml`.
 4. Boot the device and `POST /scenarios/{id}/run`.
 
-Do not add a Rust test per scenario. Check is the compiler.
+Do not add a Rust test per scenario. Check is the compiler. Session upload
+(`POST /scenarios`) is for a live process, not a substitute for the YAML.

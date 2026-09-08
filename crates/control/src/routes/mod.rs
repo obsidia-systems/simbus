@@ -8,7 +8,7 @@ pub mod status;
 use axum::Json;
 use axum::Router;
 use axum::http::{HeaderMap, StatusCode};
-use axum::routing::{get, patch, post};
+use axum::routing::{delete, get, patch, post};
 
 use crate::AppState;
 use crate::dto::ErrorBody;
@@ -42,7 +42,11 @@ pub fn api_router() -> Router<AppState> {
         )
         .route("/simulation", patch(simulation::patch_simulation))
         .route("/simulation/reset", post(simulation::reset_simulation))
-        .route("/scenarios", get(scenarios::list_scenarios))
+        .route(
+            "/scenarios",
+            get(scenarios::list_scenarios).post(scenarios::install_scenario),
+        )
+        .route("/scenarios/{name}", delete(scenarios::uninstall_scenario))
         .route("/scenarios/active", get(scenarios::active_scenario))
         .route("/scenarios/{name}/run", post(scenarios::run_scenario))
         .route("/scenarios/stop", post(scenarios::stop_scenario))

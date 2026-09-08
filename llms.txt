@@ -13,9 +13,9 @@ Human front door: [README.md](README.md). Contracts live in `docs/` and win over
 - [docs/modbus.md](docs/modbus.md): Field plane — Modbus TCP PDU (V1.1b3 / V1.0b).
 - [docs/control.md](docs/control.md): Session HTTP (not the field protocol). OpenAPI at `GET /docs` on a running process.
 - [docs/simulation.md](docs/simulation.md): Tick, `state.base`, behaviors, faults, encode.
-- [docs/scenarios.md](docs/scenarios.md): How to run scenarios bundled in the device YAML.
+- [docs/scenarios.md](docs/scenarios.md): How to run scenarios bundled in the device YAML (and session install).
 - [docs/architecture.md](docs/architecture.md): Process shape, crates, repo layout.
-- [docs/debt.md](docs/debt.md): Specified as not this version (pause, scenario upload, extra protocols).
+- [docs/debt.md](docs/debt.md): Specified as not this version (extra protocols).
 - [docs/README.md](docs/README.md): Diátaxis index.
 
 ## Device maps

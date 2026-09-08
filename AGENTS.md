@@ -100,8 +100,7 @@ together. New code, comments, and docs are English.
 
 ## Deferred
 
-`docs/debt.md`: pause, `POST /scenarios` upload, serving extra protocols
-(spec §4). Do not restore Python.
+`docs/debt.md`: serving extra protocols (spec §4). Do not restore Python.
 
 ## Branches
 

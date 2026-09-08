@@ -318,7 +318,7 @@ Normative route list: [docs/control.md](docs/control.md). Interactive docs at
 | `GET` | `/status` | Name, type, listen Modbus port, tick, `time_scale`, `running`/`stopped`, Modbus `listening`/`stopped` |
 | `GET` | `/config` | Contract snapshot — map, `spec_version`, bundled scenarios |
 | `GET` | `/healthz` | Liveness (200 if the HTTP task is up) |
-| `GET` | `/readyz` | 200 when Modbus is listening and `is_running`; else 503 |
+| `GET` | `/readyz` | 200 when Modbus is listening and the simulation is running; else 503 |
 | `GET` | `/metrics` | Prometheus text |
 | `GET` | `/docs` | Swagger UI (`/api-docs/openapi.json` for the spec) |
 
@@ -359,7 +359,7 @@ curl -N http://localhost:8000/registers/stream
 
 | Method | Endpoint | Description |
 | --- | --- | --- |
-| `PATCH` | `/simulation` | Update tick interval live — takes effect next tick |
+| `PATCH` | `/simulation` | `tick_interval` and/or `running` (pause/resume) |
 | `POST` | `/simulation/reset` | Reset all registers to YAML defaults, clear all faults |
 | `GET` | `/faults` | Active faults (TTL remaining is simulation seconds) |
 | `POST` | `/faults` | Inject a fault |
@@ -369,7 +369,9 @@ curl -N http://localhost:8000/registers/stream
 
 | Method | Endpoint | Description |
 | --- | --- | --- |
-| `GET` | `/scenarios` | List scenarios bundled in the loaded device YAML |
+| `GET` | `/scenarios` | Bundled + session copies (`source`: `bundled` or `session`) |
+| `POST` | `/scenarios` | Install a session copy (JSON, same schema as the YAML) |
+| `DELETE` | `/scenarios/{name}` | Drop a session copy (not a bundled id) |
 | `POST` | `/scenarios/{name}/run` | Start replay (`{name}` is the scenario `id`) |
 | `GET` | `/scenarios/active` | Active scenario status (step, elapsed, total) |
 | `POST` | `/scenarios/stop` | Cancel any running scenario |
@@ -632,6 +634,7 @@ Typical events include:
 - `simbus started` / `simbus stopping`
 - `api listening` / `modbus server listening`
 - `fault injected` / `fault expired` / `faults cleared` / `simulation reset`
+- `simulation paused` / `simulation resumed`
 - `simulation base changed` / `alarm activated` / `alarm cleared` / `discrete changed`
 - `simulation tick health` when `SIMBUS_TICK_HEALTH_LOG_INTERVAL` is > 0 (`tick_interval`, `time_scale`, `tick_duration_ms`, `loop_drift_ms`, `sse_subscribers`, `active_faults`, `uptime_s`)
 
@@ -799,9 +802,8 @@ timeline
     title simbus Roadmap
     v0.1 — Core : Modbus TCP, 7 templates, 6 behaviors, REST plus SSE, faults, Docker
     v0.2 — Scenarios : Playback API, recipes later moved into device YAML
-    v0.3 — Rust workspace : this tree — tokio-modbus, axum, file-only boot, healthz/readyz/metrics
+    v0.3 — Rust workspace : this tree — tokio-modbus, axum, file-only boot, pause, session scenarios, healthz/readyz/metrics
     Specified not served : MQTT Sparkplug, SNMP v2c, BACnet/IP, OPC UA, Modbus RTU/TLS
-    Ops debt : pause, scenario upload
 ```
 
 Unimplemented protocol **syntax** is already valid YAML (`simbus check` notes it;

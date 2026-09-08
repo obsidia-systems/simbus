@@ -38,7 +38,8 @@ map. It MUST NOT auto-run scenarios.
 `simbus check` is the same binary without starting those tasks. `check` MUST
 take an explicit path (it does not imply the default template).
 
-`simbus ctl` MUST NOT load a device or start tasks. It is an HTTP client
+`simbus ctl` MUST NOT boot a device or start tasks. `install` MAY parse a
+local JSON or YAML scenario file and POST JSON. It is an HTTP client
 ([control.md](control.md) §4).
 
 ---
@@ -153,12 +154,14 @@ this log.
 | Modbus TCP | `modbus::serve` | Same |
 | HTTP | `control::serve` | Same |
 
-The tick loop sleeps `tick_interval` (wall seconds) and passes
-`dt = tick_interval × time_scale` to the engine. It MUST re-read
-`tick_interval` every iteration so a PATCH takes effect on the next wait.
-Missed ticks use tokio `Delay` (catch up without bursting a backlog of ticks).
-After each `tick(dt)` the runtime MUST publish the snapshot on the control
-plane `watch` channel (`GET /registers/stream`).
+The tick loop sleeps `tick_interval` (wall seconds) and, when `is_running`
+is true, passes `dt = tick_interval × time_scale` to the engine. It MUST
+re-read `tick_interval` every iteration so a PATCH takes effect on the next
+wait. Missed ticks use tokio `Delay` (catch up without bursting a backlog of
+ticks). After each `tick(dt)` that actually ran, the runtime MUST publish
+the snapshot on the control plane `watch` channel (`GET /registers/stream`).
+While paused the loop MUST still wait `tick_interval` but MUST NOT call
+`tick` and MUST NOT publish a tick snapshot.
 
 ---
 

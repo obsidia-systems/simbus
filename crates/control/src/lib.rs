@@ -76,6 +76,8 @@ impl AppState {
         routes::simulation::patch_simulation,
         routes::simulation::reset_simulation,
         routes::scenarios::list_scenarios,
+        routes::scenarios::install_scenario,
+        routes::scenarios::uninstall_scenario,
         routes::scenarios::run_scenario,
         routes::scenarios::active_scenario,
         routes::scenarios::stop_scenario,

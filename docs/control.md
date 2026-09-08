@@ -30,15 +30,16 @@ The control plane MUST:
 2. Read and override registers/coils that **exist in the loaded document**.
 3. Inject and clear faults; change `tick_interval`; reset to boot
    ([simulation.md](simulation.md) §6).
-4. List and run scenarios **bundled in that document**. Unknown ids MUST
-   404.
-5. Stream bank snapshots on each engine tick **and** after session writes
-   (PATCH, faults, reset).
+4. List and run scenarios **bundled in that document**, and session-installed
+   copies (`POST /scenarios`). Unknown ids MUST 404.
+5. Pause and resume the tick (`PATCH /simulation` `running`).
+6. Stream bank snapshots on each engine tick **and** after session writes
+   (PATCH, faults, reset). Not on a skipped wait while paused.
 
-It MUST NOT load a second YAML dialect. It MUST NOT install a scenario
-that was not in the document (`POST /scenarios` upload is not in this
-version; specify it here before implementing). It MUST NOT pause the
-tick (`is_running` is status only).
+It MUST NOT load a second YAML dialect (upload body is JSON, same schema as
+[spec.md](spec.md) §7). It MUST NOT write the device file. It MUST NOT
+enlarge the register map. Session scenarios live in RAM and die with the
+process.
 
 Session state is RAM. It is discarded when the process exits.
 
@@ -83,7 +84,7 @@ GET (including SSE) is not keyed. Missing/wrong key on a write MUST 401.
 | `GET` | `/status` | Live: name, type, **listen** Modbus port, tick, `time_scale`, `running`/`stopped`, Modbus `listening`/`stopped` |
 | `GET` | `/config` | Document snapshot: map, `spec_version`, endianness, YAML `modbus.default_port`, bundled scenarios |
 | `GET` | `/healthz` | Liveness (always 200 if the task is up) |
-| `GET` | `/readyz` | 200 when Modbus is listening **and** `is_running`; else 503 |
+| `GET` | `/readyz` | 200 when Modbus is listening **and** the simulation is running; else 503 (paused → 503) |
 | `GET` | `/metrics` | Prometheus text |
 | `GET` | `/docs` | Swagger UI |
 | `GET` | `/api-docs/openapi.json` | OpenAPI 3. The document MUST list every route in this section |
@@ -128,8 +129,8 @@ sequenceDiagram
 
 | Method | Path | Notes |
 | --- | --- | --- |
-| `PATCH` | `/simulation` | `{"tick_interval": 0.5}`; MUST be > 0 |
-| `POST` | `/simulation/reset` | Boot `RegState` + YAML defaults; same seeded trace |
+| `PATCH` | `/simulation` | `tick_interval` (> 0) and/or `running` (bool). Omitted fields unchanged. Response: `{tick_interval, running}` |
+| `POST` | `/simulation/reset` | Boot `RegState` + YAML defaults; same seeded trace. Does **not** change `running` or the session scenario catalog |
 | `GET` | `/faults` | Active faults (TTL remaining is simulation seconds) |
 | `POST` | `/faults` | Inject; see [simulation.md](simulation.md) §8 |
 | `DELETE` | `/faults` | Clear all |
@@ -139,26 +140,45 @@ sequenceDiagram
 MUST name a holding/input register; `alarm` MUST name a coil. Unknown names
 MUST 404 (not a silent no-op).
 
+`running: false` pauses the simulation clock: `tick(dt)` is a no-op, fault
+TTLs freeze, SSE does not get a tick frame. Modbus still serves the last
+bank. Session writes (PATCH, faults, reset) still apply and still publish
+SSE. Scenario playback MUST NOT apply steps and MUST NOT count wall time
+toward `at:` while paused. `running: true` resumes from the frozen
+`elapsed_s`. Empty body is a no-op that returns the current pair.
+
 ### Scenarios
 
-Catalog = `scenarios:` in the loaded document. `at:` is **simulation
-seconds** from `POST /run`. The HTTP layer sleeps
-`wall = at / time_scale` ([runtime.md](runtime.md) §4). Default scale `1`
-keeps wall and `at:` 1:1. `elapsed_s` on `/scenarios/active` is simulation
-seconds (`wall_elapsed × time_scale`).
+Catalog = `scenarios:` in the loaded document **plus** session-installed
+ids. `GET /config.scenarios` is the document only. `at:` is **simulation
+seconds** from `POST /run`. The HTTP layer sleeps `wall = at / time_scale`
+([runtime.md](runtime.md) §4). Default scale `1` keeps wall and `at:` 1:1.
+`elapsed_s` on `/scenarios/active` is simulation seconds
+(`unpaused_wall_elapsed × time_scale`).
 
 | Method | Path | Notes |
 | --- | --- | --- |
-| `GET` | `/scenarios` | `{id, name, description, steps}` |
-| `POST` | `/scenarios/{name}/run` | `{name}` is the scenario `id`. 202 or 404 |
+| `GET` | `/scenarios` | `{id, name, description, steps, source}` — `source` is `bundled` or `session` |
+| `POST` | `/scenarios` | Install a session copy (JSON body, spec.md §7). 201, 409 if the id is bundled, 422 if invalid |
+| `DELETE` | `/scenarios/{name}` | Drop a session copy. 204. 404 unknown. 409 if bundled |
+| `POST` | `/scenarios/{name}/run` | `{name}` is the scenario `id` (bundled or session). 202 or 404 |
 | `GET` | `/scenarios/active` | Runner status |
 | `POST` | `/scenarios/stop` | Cancel (204) |
 
 Boot leaves scenarios **idle**. Starting a second scenario aborts the first.
+Installing the same session `id` again replaces the copy (201). DELETE of
+the active id MUST stop playback first.
+
+`POST /scenarios` body is JSON, not YAML. `id` MUST be kebab-case and MUST
+not match a bundled id. Steps are validated against the **loaded map**
+(unknown register/coil → 422). The file on disk does not change.
 
 ```bash
 curl http://localhost:8000/scenarios
 curl -X POST http://localhost:8000/scenarios/heat-wave/run
+curl -X POST http://localhost:8000/scenarios \
+  -H 'content-type: application/json' \
+  -d '{"id":"lab-spike","name":"Lab spike","steps":[{"action":"set_register","at":0,"register_name":"temperature","value":30.0}]}'
 ```
 
 `heat-wave` exists on generic T&H. `power-outage` exists on generic UPS.
@@ -173,8 +193,9 @@ Flags (`--file`, `--port`, `--tick`, `--time-scale`, `--seed`, …) apply at
 boot.
 
 `simbus ctl` is an HTTP **client** of a process that is already listening.
-It MUST call the routes in §3. It MUST NOT load YAML, start Modbus, or
-start the tick loop.
+It MUST call the routes in §3. It MUST NOT boot a device, start Modbus, or
+start the tick loop. `install` MAY parse a local JSON or YAML scenario file
+and POST it as JSON.
 
 | Flag | Env | Default |
 | --- | --- | --- |
@@ -198,9 +219,13 @@ on 2xx, `1` otherwise.
 | `simbus ctl faults` | `GET /faults` |
 | `simbus ctl fault --type …` | `POST /faults` |
 | `simbus ctl clear-faults` | `DELETE /faults` |
-| `simbus ctl tick --interval 0.5` | `PATCH /simulation` |
+| `simbus ctl tick --interval 0.5` | `PATCH /simulation` `{tick_interval}` |
+| `simbus ctl pause` | `PATCH /simulation` `{"running": false}` |
+| `simbus ctl resume` | `PATCH /simulation` `{"running": true}` |
 | `simbus ctl reset` | `POST /simulation/reset` |
 | `simbus ctl scenarios` | `GET /scenarios` |
+| `simbus ctl install <file>` | `POST /scenarios` (JSON or YAML file parsed locally, sent as JSON) |
+| `simbus ctl uninstall <id>` | `DELETE /scenarios/{id}` |
 | `simbus ctl run <id>` | `POST /scenarios/{id}/run` |
 | `simbus ctl active` | `GET /scenarios/active` |
 | `simbus ctl stop` | `POST /scenarios/stop` |

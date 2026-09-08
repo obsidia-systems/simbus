@@ -87,6 +87,8 @@ simbus --file path/to/device.yaml --port 502 --api-port 8000
 ## Gotchas
 
 - Restore neither Python, `scenarios/*.yaml`, nor `--type`.
+- `POST /scenarios` on a running process is RAM-only. Put recipes in the YAML
+  so `simbus check` sees them.
 - Live session state (faults, PATCH) is HTTP (`docs/control.md`), not YAML.
 - Do not duplicate a register to “make it writable over Modbus” if it should
   be input: keep FC4 and use the control API.

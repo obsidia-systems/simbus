@@ -177,15 +177,20 @@ writes and on the **next tick** after a Modbus write.
 
 ## 6. Process lifecycle
 
-`is_running` is `/status` and `/readyz` only. Tick ignores it. Pause is
-not in this version ([debt.md](debt.md)).
+`is_running` is the pause flag (`PATCH /simulation` `running`). Tick is a
+no-op while paused. `/readyz` is 503 while paused. Modbus still serves the
+last bank.
 
 ```mermaid
 stateDiagram-v2
     [*] --> Booting
     Booting --> Running: servers listening
+    Running --> Paused: PATCH running false
+    Paused --> Running: PATCH running true
     Running --> Stopping: SIGINT or SIGTERM
+    Paused --> Stopping: SIGINT or SIGTERM
     Running --> Failed: Modbus or HTTP task died
+    Paused --> Failed: Modbus or HTTP task died
     Stopping --> [*]: exit 0
     Failed --> [*]: exit non-zero
 ```

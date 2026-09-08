@@ -166,9 +166,13 @@ pub async fn patch_simulation(
         }
         state.device.set_tick_interval(tick);
     }
-    Ok(Json(
-        json!({ "tick_interval": state.device.tick_interval() }),
-    ))
+    if let Some(running) = body.running {
+        state.device.set_running(running);
+    }
+    Ok(Json(json!({
+        "tick_interval": state.device.tick_interval(),
+        "running": state.device.is_running(),
+    })))
 }
 
 #[utoipa::path(post, path = "/simulation/reset", responses((status = 204), (status = 401)))]

@@ -350,6 +350,9 @@ async fn run_tick_loop(
             (woke.duration_since(prev).as_secs_f64() - wall) * 1000.0
         });
         prev_wake = Some(woke);
+        if !device.is_running() {
+            continue;
+        }
         let t0 = Instant::now();
         let snap = device.tick(wall * time_scale);
         let tick_duration_ms = t0.elapsed().as_secs_f64() * 1000.0;

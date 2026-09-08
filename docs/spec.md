@@ -26,15 +26,15 @@ The keywords **MUST**, **MUST NOT**, **SHOULD**, **MAY** are used as in RFC 2119
 | --- | --- |
 | **Author** | A device document MUST pass `simbus check` before it is merged or shipped. |
 | **Validator** (`simbus check`) | MUST load, parse, and validate the document. MUST print a summary. MUST exit `0` for a valid document, including those that declare unimplemented protocols. MUST exit `1` for schema or cross-reference errors. |
-| **Runtime** | MUST load the entire document at process start. MUST NOT start if any resolved binding is unimplemented. MUST NOT add or remove registers, coils, or alarms after boot. MAY change live *values* (bases, coils without a trigger, faults, tick interval) through the control plane. MUST expose bundled scenarios for on-demand run; MUST NOT auto-run them at boot. |
-| **Control plane** | Session state (values, faults, an in-flight scenario) is RAM-only. `POST /simulation/reset` MUST restore YAML defaults and clear faults. |
+| **Runtime** | MUST load the entire document at process start. MUST NOT start if any resolved binding is unimplemented. MUST NOT add or remove registers, coils, or alarms after boot. MAY change live *values* (bases, coils without a trigger, faults, tick interval, pause) through the control plane. MUST expose bundled scenarios for on-demand run; MAY accept a session copy (`POST /scenarios`) that is not written back to this file. MUST NOT auto-run scenarios at boot. |
+| **Control plane** | Session state (values, faults, pause, in-flight scenario, session-installed scenarios) is RAM-only. `POST /simulation/reset` MUST restore YAML defaults and clear faults; it MUST NOT drop session scenarios or change pause. |
 
 Two layers, one source of truth:
 
 | Layer | Contents | Lifetime |
 | --- | --- | --- |
 | **Boot contract** | This YAML | The file. Community PR. `simbus check`. |
-| **Session** | Current values, faults, tick, scenario playback | Process memory. Dies with the process. |
+| **Session** | Current values, faults, tick, pause, scenario playback, session-installed scenarios | Process memory. Dies with the process. |
 
 The register map is **immutable** in this version. Changing `temperature` is a
 PATCH. Creating a register that was not in the YAML is out of scope.
@@ -401,6 +401,9 @@ Writes a real-world value and shifts `state.base`.
 | `tick_interval` | float | MUST be > 0 (seconds) |
 
 Playback is started from the control plane. Boot MUST leave scenarios idle.
+The control plane MAY install an extra copy for this process only
+(`POST /scenarios`, JSON, same fields). That copy MUST NOT be written back
+to the device file. `simbus check` does not see session copies.
 
 ---
 

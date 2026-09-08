@@ -10,14 +10,8 @@ When an item is done: delete it from this file and note it in
 `CHANGELOG.md`. Spec-first still applies — if the contract is missing,
 write the doc before the code.
 
----
-
-## Control / engine (specified, not in this version)
-
-| Item | Notes |
-| --- | --- |
-| Pause | `is_running` is `/status` and `/readyz` only. `tick()` ignores it. Specify in [control.md](control.md) first. |
-| `POST /scenarios` (upload) | Installing a scenario that was not in the YAML is not in this version. Specify in [control.md](control.md) first. |
+Pause and session scenario install are in [control.md](control.md)
+(this version).
 
 ---
 
