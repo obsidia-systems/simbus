@@ -109,10 +109,18 @@ pub async fn metrics(State(state): State<AppState>) -> String {
         "# HELP simbus_running 1 if the simulation loop is running\n# TYPE simbus_running gauge\nsimbus_running {}\n\
          # HELP simbus_tick_interval_seconds Configured tick interval\n# TYPE simbus_tick_interval_seconds gauge\nsimbus_tick_interval_seconds {}\n\
          # HELP simbus_active_faults Active fault count\n# TYPE simbus_active_faults gauge\nsimbus_active_faults {}\n\
-         # HELP simbus_holding_registers Holding register count\n# TYPE simbus_holding_registers gauge\nsimbus_holding_registers {}\n",
+         # HELP simbus_holding_registers Holding register word count\n# TYPE simbus_holding_registers gauge\nsimbus_holding_registers {}\n\
+         # HELP simbus_input_registers Input register word count\n# TYPE simbus_input_registers gauge\nsimbus_input_registers {}\n\
+         # HELP simbus_coils Coil count\n# TYPE simbus_coils gauge\nsimbus_coils {}\n\
+         # HELP simbus_discrete Discrete input count\n# TYPE simbus_discrete gauge\nsimbus_discrete {}\n\
+         # HELP simbus_sse_subscribers Live GET /registers/stream receivers\n# TYPE simbus_sse_subscribers gauge\nsimbus_sse_subscribers {}\n",
         i32::from(state.device.is_running()),
         state.device.tick_interval(),
         state.device.faults().len(),
         snap.holding.len(),
+        snap.input.len(),
+        snap.coils.len(),
+        snap.discrete.len(),
+        state.snapshots.receiver_count(),
     )
 }

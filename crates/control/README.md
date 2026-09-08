@@ -15,6 +15,5 @@ a `watch` channel filled by the runtime.
 cargo test -p control
 ```
 
-- Integration (`tests/http.rs`): probes, `/status`, `/config` wire format,
-  bundled scenarios, 404 unknown scenario, API key, OpenAPI path set, first
-  SSE frame
+- Integration (`tests/http.rs`): probes, `/status`, `/config`, PATCH,
+  faults 404/422, bundled scenarios, API key, OpenAPI, first SSE frame

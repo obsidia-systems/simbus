@@ -13,7 +13,7 @@ use tokio_stream::wrappers::WatchStream;
 
 use crate::AppState;
 use crate::dto::{CoilOverrideRequest, ErrorBody, RegisterOverrideRequest, SnapshotResponse};
-use crate::routes::authorize;
+use crate::routes::require_auth;
 
 #[utoipa::path(get, path = "/registers", responses((status = 200)))]
 pub async fn get_registers(State(state): State<AppState>) -> Json<SnapshotResponse> {
@@ -33,14 +33,7 @@ async fn override_numeric(
     address: u16,
     body: RegisterOverrideRequest,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<ErrorBody>)> {
-    authorize(state, headers).map_err(|s| {
-        (
-            s,
-            Json(ErrorBody {
-                detail: "unauthorized".into(),
-            }),
-        )
-    })?;
+    require_auth(state, headers)?;
     if body.value.is_none() && body.real_value.is_none() {
         return Err((
             StatusCode::UNPROCESSABLE_ENTITY,
@@ -61,6 +54,7 @@ async fn override_numeric(
         .device
         .override_register(space, address, body.value, body.real_value, "api")
         .map(|(raw, real)| {
+            state.publish_snapshot();
             Json(json!({ "address": address, "raw_value": raw, "real_value": real }))
         })
         .map_err(|e| {
@@ -115,18 +109,14 @@ pub async fn override_coil(
     Path(address): Path<u16>,
     Json(body): Json<CoilOverrideRequest>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<ErrorBody>)> {
-    authorize(&state, &headers).map_err(|s| {
-        (
-            s,
-            Json(ErrorBody {
-                detail: "unauthorized".into(),
-            }),
-        )
-    })?;
+    require_auth(&state, &headers)?;
     state
         .device
         .override_coil(address, body.value)
-        .map(|value| Json(json!({ "address": address, "value": value })))
+        .map(|value| {
+            state.publish_snapshot();
+            Json(json!({ "address": address, "value": value }))
+        })
         .map_err(|e| {
             (
                 StatusCode::NOT_FOUND,
@@ -149,18 +139,14 @@ pub async fn override_discrete(
     Path(address): Path<u16>,
     Json(body): Json<CoilOverrideRequest>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<ErrorBody>)> {
-    authorize(&state, &headers).map_err(|s| {
-        (
-            s,
-            Json(ErrorBody {
-                detail: "unauthorized".into(),
-            }),
-        )
-    })?;
+    require_auth(&state, &headers)?;
     state
         .device
         .override_discrete(address, body.value)
-        .map(|value| Json(json!({ "address": address, "value": value })))
+        .map(|value| {
+            state.publish_snapshot();
+            Json(json!({ "address": address, "value": value }))
+        })
         .map_err(|e| {
             (
                 StatusCode::NOT_FOUND,

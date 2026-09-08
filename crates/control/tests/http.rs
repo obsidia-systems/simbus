@@ -195,3 +195,104 @@ async fn sse_emits_current_snapshot() {
         "unexpected sse payload: {text}"
     );
 }
+
+fn json_request(method: &str, uri: &str, body: &str) -> Request<Body> {
+    Request::builder()
+        .method(method)
+        .uri(uri)
+        .header("content-type", "application/json")
+        .body(Body::from(body.to_owned()))
+        .unwrap()
+}
+
+#[tokio::test]
+async fn get_registers_returns_defaults() {
+    let response = app()
+        .oneshot(Request::get("/registers").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response.into_body().collect().await.unwrap().to_bytes();
+    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(json["holding"]["0"], 225);
+}
+
+#[tokio::test]
+async fn patch_holding_shifts_base() {
+    let response = app()
+        .oneshot(json_request(
+            "PATCH",
+            "/registers/0",
+            r#"{"real_value": 27.0}"#,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response.into_body().collect().await.unwrap().to_bytes();
+    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(json["raw_value"], 270);
+    assert_eq!(json["real_value"], 27.0);
+}
+
+#[tokio::test]
+async fn patch_rejects_both_value_fields() {
+    let response = app()
+        .oneshot(json_request(
+            "PATCH",
+            "/registers/0",
+            r#"{"value": 270, "real_value": 27.0}"#,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+}
+
+#[tokio::test]
+async fn inject_fault_rejects_unknown_register() {
+    let response = app()
+        .oneshot(json_request(
+            "POST",
+            "/faults",
+            r#"{"fault_type":"spike","register_name":"nope","value":35.0,"duration_s":5}"#,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn inject_spike_requires_value() {
+    let response = app()
+        .oneshot(json_request(
+            "POST",
+            "/faults",
+            r#"{"fault_type":"spike","register_name":"temperature","duration_s":5}"#,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+}
+
+#[tokio::test]
+async fn inject_known_spike_is_accepted() {
+    let response = app()
+        .oneshot(json_request(
+            "POST",
+            "/faults",
+            r#"{"fault_type":"spike","register_name":"temperature","value":35.0,"duration_s":5}"#,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::ACCEPTED);
+}
+
+#[tokio::test]
+async fn readyz_unavailable_when_not_running() {
+    let state = tnh_state();
+    state.device.set_running(false);
+    let response = control::router(state, &["*".to_owned()])
+        .oneshot(Request::get("/readyz").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+}

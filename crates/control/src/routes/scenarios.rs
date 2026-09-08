@@ -9,22 +9,20 @@ use serde_json::json;
 use tokio::time::sleep;
 
 use crate::AppState;
-use crate::dto::ErrorBody;
-use crate::routes::authorize;
+use crate::dto::{ErrorBody, ScenarioInfo};
+use crate::routes::require_auth;
 
 #[utoipa::path(get, path = "/scenarios", responses((status = 200)))]
-pub async fn list_scenarios(State(state): State<AppState>) -> Json<Vec<serde_json::Value>> {
+pub async fn list_scenarios(State(state): State<AppState>) -> Json<Vec<ScenarioInfo>> {
     let spec = state.device.spec();
     Json(
         spec.scenarios
             .iter()
-            .map(|s| {
-                json!({
-                    "id": s.id,
-                    "name": s.name,
-                    "description": s.description,
-                    "steps": s.steps.len(),
-                })
+            .map(|s| ScenarioInfo {
+                id: s.id.clone(),
+                name: s.name.clone(),
+                description: s.description.clone(),
+                steps: s.steps.len(),
             })
             .collect(),
     )
@@ -36,14 +34,7 @@ pub async fn run_scenario(
     headers: HeaderMap,
     Path(name): Path<String>,
 ) -> Result<(StatusCode, Json<serde_json::Value>), (StatusCode, Json<ErrorBody>)> {
-    authorize(&state, &headers).map_err(|s| {
-        (
-            s,
-            Json(ErrorBody {
-                detail: "unauthorized".into(),
-            }),
-        )
-    })?;
+    require_auth(&state, &headers)?;
     let spec = match state.device.spec().scenario(&name) {
         Some(s) => s.clone(),
         None => {
@@ -106,8 +97,8 @@ pub async fn active_scenario(State(state): State<AppState>) -> Json<serde_json::
 pub async fn stop_scenario(
     State(state): State<AppState>,
     headers: HeaderMap,
-) -> Result<StatusCode, StatusCode> {
-    authorize(&state, &headers)?;
+) -> Result<StatusCode, (StatusCode, Json<ErrorBody>)> {
+    require_auth(&state, &headers)?;
     state.scenarios.mark_stopped();
     if let Some(handle) = state.scenario_task.lock().unwrap().take() {
         handle.abort();

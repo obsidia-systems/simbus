@@ -47,6 +47,13 @@ pub struct AppState {
     pub snapshots: watch::Sender<Snapshot>,
 }
 
+impl AppState {
+    /// Push the current bank to SSE subscribers (tick or session write).
+    pub fn publish_snapshot(&self) {
+        let _ = self.snapshots.send(self.device.snapshot());
+    }
+}
+
 #[derive(OpenApi)]
 #[openapi(
     paths(

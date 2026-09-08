@@ -5,11 +5,13 @@ pub mod scenarios;
 pub mod simulation;
 pub mod status;
 
+use axum::Json;
 use axum::Router;
 use axum::http::{HeaderMap, StatusCode};
 use axum::routing::{get, patch, post};
 
 use crate::AppState;
+use crate::dto::ErrorBody;
 
 pub fn api_router() -> Router<AppState> {
     Router::new()
@@ -64,4 +66,18 @@ pub(crate) fn authorize(state: &AppState, headers: &HeaderMap) -> Result<(), Sta
     } else {
         Err(StatusCode::UNAUTHORIZED)
     }
+}
+
+pub(crate) fn require_auth(
+    state: &AppState,
+    headers: &HeaderMap,
+) -> Result<(), (StatusCode, Json<ErrorBody>)> {
+    authorize(state, headers).map_err(|s| {
+        (
+            s,
+            Json(ErrorBody {
+                detail: "unauthorized".into(),
+            }),
+        )
+    })
 }
