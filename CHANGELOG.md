@@ -29,6 +29,9 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - `AGENTS.md` (how to change this repo), `llms.txt` (documentation map), and
   the Agent Skill `.agents/skills/simbus-device/` for writing device YAML
   (`npx skills add obsidia-systems/simbus@simbus-device`).
+- Simplified GitFlow (`CONTRIBUTING.md`): feature PRs to `develop`; `main` is
+  the last published tree. A `v*` tag on `main` publishes GHCR and native
+  binaries via `dist` (linux amd64/arm64, macOS aarch64, shell installer).
 
 ### Changed
 
@@ -67,6 +70,11 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   `simulation tick health` is emitted when `SIMBUS_TICK_HEALTH_LOG_INTERVAL` > 0.
 - SIGINT/SIGTERM: stop accepting, wait up to `SIMBUS_SHUTDOWN_TIMEOUT` (default
   5 s), then abort leftover tasks (including SSE). Timeout `0` aborts immediately.
+- CI: `cargo deny check` in the PR gate; GHCR publish requires the `v*` tag
+  commit to be an ancestor of `origin/main`. Native binaries and a shell
+  installer ship from `.github/workflows/release.yml` (`dist` 0.32). The
+  binary Cargo package is `simbus` (`-p simbus`); the crate directory remains
+  `crates/runtime`.
 
 ### Removed
 
@@ -74,7 +82,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Global `scenarios/` catalog. Recipes now live under `scenarios:` in each
   device YAML.
 - CI job `python-legacy` (`uv` / ruff / mypy / pytest). CI is Rust-only:
-  fmt, clippy, `cargo test --workspace --locked`, `simbus check` on `devices/`.
+  fmt, clippy, `cargo test --workspace --locked`, `cargo deny check`,
+  `simbus check` on `devices/`.
 
 ---
 

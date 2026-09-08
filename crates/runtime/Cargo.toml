@@ -1,16 +1,21 @@
 [package]
-name = "runtime"
+name = "simbus"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 authors.workspace = true
-description = "simbus device runtime — one process, one device"
+homepage.workspace = true
+description = "Industrial field device simulator — one process, one device"
+publish = false
 
 [[bin]]
 name = "simbus"
 path = "src/main.rs"
+
+[package.metadata.dist]
+dist = true
 
 [lints]
 workspace = true

@@ -408,7 +408,7 @@ Playback is started from the control plane. Boot MUST leave scenarios idle.
 
 ```bash
 simbus check devices/community/my-device.yaml
-cargo run -p runtime -- check devices/builtin/generic-tnh-sensor.yaml
+cargo run -p simbus -- check devices/builtin/generic-tnh-sensor.yaml
 ```
 
 The validator MUST reject a document when any of the following hold:

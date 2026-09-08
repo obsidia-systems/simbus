@@ -82,7 +82,7 @@ crate; contracts are in this folder):
 | `engine` | `cargo test -p engine` | `src/behaviors.rs`, `src/encode.rs`; `tests/engine.rs` |
 | `control` | `cargo test -p control` | `tests/http.rs` (probes, PATCH, faults, scenarios, API key, SSE) |
 | `modbus` | `cargo test -p modbus --locked` | FC1–FC4 / 5 / 6 / 15 / 16 and exceptions 02 / 03 |
-| `runtime` | `cargo test -p runtime --locked` | clap (`--file`, `--tick`, `--time-scale`, `--seed`, `check`, `ctl`); default template |
+| `runtime` (`-p simbus`) | `cargo test -p simbus --locked` | clap (`--file`, `--tick`, `--time-scale`, `--seed`, `check`, `ctl`); default template |
 
 Device YAML is validated with `simbus check`, not a Rust test per file.
 

@@ -10,7 +10,8 @@
 This document is the contract of **the process**: one binary, one device,
 boot, tasks, signals, and CLI/env. It does not redefine YAML syntax.
 
-The crate is `crates/runtime`. The binary name is `simbus`.
+The crate lives in `crates/runtime`. The Cargo package and binary name are
+`simbus` (`cargo run -p simbus`).
 
 ---
 

@@ -35,6 +35,7 @@ a contract. Repository layout: [architecture.md](architecture.md) §2.
 | File | Job |
 | --- | --- |
 | [AGENTS.md](../AGENTS.md) | How to **change this repo** (build, tests, spec-first, **release**) |
+| [CONTRIBUTING.md](../CONTRIBUTING.md) | GitFlow: PR to `develop`, tag `main` |
 | [llms.txt](../llms.txt) | Map of documentation (what to read) |
 | [simbus-device skill](../.agents/skills/simbus-device/SKILL.md) | How to **write a device YAML**. In this clone it is already on disk. Elsewhere: `npx skills add obsidia-systems/simbus@simbus-device` |
 

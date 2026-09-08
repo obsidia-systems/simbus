@@ -6,6 +6,10 @@ on:
   pull_request:
     branches: [main, develop]
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   rust:
     name: Rust
@@ -31,10 +35,13 @@ jobs:
       - name: Test
         run: cargo test --workspace --locked
 
+      - name: Deny
+        uses: EmbarkStudios/cargo-deny-action@v2
+
       - name: Validate device YAML
         run: |
           set -euo pipefail
-          cargo build -p runtime --locked --quiet
+          cargo build -p simbus --locked --quiet
           fail=0
           while IFS= read -r -d '' f; do
             echo "==> $f"

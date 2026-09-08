@@ -6,7 +6,7 @@ COPY Cargo.toml Cargo.lock rust-toolchain.toml rustfmt.toml ./
 COPY crates ./crates
 COPY devices ./devices
 
-RUN cargo build --release -p runtime
+RUN cargo build --release -p simbus
 
 # ── Stage 2: runtime image ───────────────────────────────────────────────────
 FROM debian:bookworm-slim AS runtime

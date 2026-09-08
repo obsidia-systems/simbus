@@ -72,7 +72,7 @@ Prefer the binary if it is on `PATH`; otherwise from a simbus checkout:
 
 ```bash
 simbus check path/to/device.yaml
-# or: cargo run -p runtime -- check path/to/device.yaml
+# or: cargo run -p simbus -- check path/to/device.yaml
 ```
 
 Exit `0` (`OK`) is the compiler. Exit `1` (`FAIL`): fix the file, do not add a

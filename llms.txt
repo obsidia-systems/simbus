@@ -2,7 +2,7 @@
 
 > Industrial field-device simulator: one process, one YAML, Modbus TCP plus HTTP control.
 
-This file is a **documentation map** for agents (same role as `/llms.txt` on a docs site). For how to **change this codebase**, read [AGENTS.md](AGENTS.md). For **authoring a device YAML**, use the project skill [simbus-device](.agents/skills/simbus-device/SKILL.md) (`npx skills add obsidia-systems/simbus@simbus-device`).
+This file is a **documentation map** for agents (same role as `/llms.txt` on a docs site). For how to **change this codebase**, read [AGENTS.md](AGENTS.md). Branch model and PR target (`develop`): [CONTRIBUTING.md](CONTRIBUTING.md). For **authoring a device YAML**, use the project skill [simbus-device](.agents/skills/simbus-device/SKILL.md) (`npx skills add obsidia-systems/simbus@simbus-device`).
 
 Human front door: [README.md](README.md). Contracts live in `docs/` and win over Rust types when they disagree.
 
@@ -24,9 +24,10 @@ Where files go (builtin vs community): [docs/spec.md](docs/spec.md) (maps table)
 - [devices/builtin/](devices/builtin/): `default.yaml` plus product-shaped templates (T&H, UPS, PDU, CRAC, power meter, leak, door).
 - [devices/community/](devices/community/): Contributor maps (example: Papouch TH2E).
 
-Validate any map with `simbus check <file>` (or `cargo run -p runtime -- check <file>`).
+Validate any map with `simbus check <file>` (or `cargo run -p simbus -- check <file>`).
 
 ## Optional
 
 - [index.html](index.html): Marketing landing, not a contract.
-- [CHANGELOG.md](CHANGELOG.md): Release notes (`## [Unreleased]` during development). How to cut a tag, bump versions, and publish GHCR: [AGENTS.md](AGENTS.md) § Release.
+- [CONTRIBUTING.md](CONTRIBUTING.md): GitFlow (feature → develop → main → tag). GitHub default branch should be `develop`.
+- [CHANGELOG.md](CHANGELOG.md): Release notes (`## [Unreleased]` during development). How to cut a tag, bump versions, and publish: [AGENTS.md](AGENTS.md) § Release.

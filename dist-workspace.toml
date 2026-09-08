@@ -1,0 +1,30 @@
+[workspace]
+members = ["cargo:."]
+
+# Config for 'dist' (https://github.com/axodotdev/cargo-dist)
+[dist]
+cargo-dist-version = "0.32.0"
+ci = "github"
+installers = ["shell"]
+targets = [
+    "aarch64-apple-darwin",
+    "aarch64-unknown-linux-gnu",
+    "x86_64-unknown-linux-gnu",
+]
+hosting = "github"
+install-path = "CARGO_HOME"
+install-updater = false
+pr-run-mode = "plan"
+github-build-setup = "ci/dist-assert-main.yml"
+
+[dist.github-custom-runners]
+global = "ubuntu-latest"
+
+[dist.github-custom-runners.x86_64-unknown-linux-gnu]
+runner = "ubuntu-24.04"
+
+[dist.github-custom-runners.aarch64-unknown-linux-gnu]
+runner = "ubuntu-24.04-arm"
+
+[dist.github-custom-runners.aarch64-apple-darwin]
+runner = "macos-14"

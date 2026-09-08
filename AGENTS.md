@@ -45,6 +45,7 @@ applies:
 
 - Normative docs in `docs/`
 - `README.md` if the front door would become wrong
+- `CONTRIBUTING.md` if the branch model or PR target changed
 - `CHANGELOG.md` (`## [Unreleased]`). On a **release**, also bump every row
   under [Release](#release) (Cargo workspace, this file, CHANGELOG heading,
   README roadmap if it names the current series)
@@ -61,12 +62,13 @@ that the code no longer has. Skip a file only when it is truly unaffected.
 cargo test --workspace --locked
 cargo clippy --workspace --all-targets --locked -- -D warnings
 cargo fmt --all -- --check
-cargo run -p runtime -- check devices/community/papouch-th2e.yaml
-cargo run -p runtime -- --file devices/builtin/generic-tnh-sensor.yaml
+cargo deny check
+cargo run -p simbus -- check devices/community/papouch-th2e.yaml
+cargo run -p simbus -- --file devices/builtin/generic-tnh-sensor.yaml
 ```
 
-CI is those four (fmt, clippy, test, `simbus check` on every `devices/**/*.yaml`).
-Do not add a Rust test per device YAML.
+CI is those five (fmt, clippy, test, `cargo deny`, `simbus check` on every
+`devices/**/*.yaml`). Do not add a Rust test per device YAML.
 
 ## Spec-first
 
@@ -100,6 +102,15 @@ together. New code, comments, and docs are English.
 
 `docs/debt.md`: pause, `POST /scenarios` upload, serving extra protocols
 (spec §4). Do not restore Python.
+
+## Branches
+
+Simplified GitFlow. Human guide: [CONTRIBUTING.md](CONTRIBUTING.md).
+
+- Open PRs to **`develop`**, not `main`.
+- Do not commit to `main` (release PR from `develop` only).
+- Do not tag `develop` or a feature branch. Tag `vX.Y.Z` only on `main`.
+- GitHub default branch should be `develop`.
 
 ## Commits
 
@@ -135,41 +146,49 @@ old `## [x.y.z]` heading.
 
 ### Cut a release `x.y.z`
 
-This product ships as the `simbus` binary and the GHCR image. Do **not**
-`cargo publish` the workspace crates.
+This product ships as the `simbus` binary (GitHub Release + shell installer)
+and the GHCR image. Do **not** `cargo publish` the workspace crates.
 
-Do this on **`main`**, CI green (`fmt`, clippy, `cargo test --workspace --locked`,
-`simbus check` on `devices/`). `.github/workflows/docker-publish.yml` builds
-on tag `v*` only when GitHub associates the tag with **`main`**
-(`github.event.base_ref == 'refs/heads/main'`). Tag the tip of `origin/main`,
-not `develop` or a feature branch.
+Human branch rules: [CONTRIBUTING.md](CONTRIBUTING.md). Work stays on
+`develop` until the cut.
 
-1. Confirm Unreleased is complete and matches HEAD.
+Do this with CI green on `develop` (`fmt`, clippy, `cargo test --workspace --locked`,
+`cargo deny check`, `simbus check` on `devices/`).
+
+1. On **`develop`**: confirm Unreleased is complete and matches HEAD.
 2. Set every row in “Version locations” to `x.y.z`.
 3. In `CHANGELOG.md`: rename `## [Unreleased]` to `## [x.y.z] — YYYY-MM-DD`
    (UTC date of the tag). Insert a new empty `## [Unreleased]` **above** it.
    If the file has Keep a Changelog compare links at the bottom, point
    `[Unreleased]` at `vX.Y.Z...HEAD` and add `[x.y.z]`.
 4. `cargo test --workspace --locked` (refreshes `Cargo.lock` if needed).
-5. Commit on `main` (message like `release: vX.Y.Z`). Push `main`.
-6. Annotated tag from that commit, then push the tag:
+5. Commit on `develop` (message like `release: vX.Y.Z`). Push `develop`.
+6. Open a PR **`develop` → `main`**. Merge when CI is green.
+7. Annotated tag on that **`main`** commit, then push the tag:
 
    ```bash
+   git checkout main
+   git pull
    git tag -a vX.Y.Z -m "simbus vX.Y.Z"
    git push origin vX.Y.Z
    ```
 
-   Tag shape is `v` + semver (`v0.3.0`). That triggers
-   `.github/workflows/docker-publish.yml` → GHCR
-   `ghcr.io/obsidia-systems/simbus:X.Y.Z`, `:X.Y`, `:latest`, `:sha-…`.
-7. GitHub Release from the same tag; body = that CHANGELOG section
-   (`gh release create vX.Y.Z --notes-file …` or the GitHub UI).
-8. **Next commit on `main`:** bump workspace + `AGENTS.md` to the **next**
-   version you will work toward (e.g. `0.3.0` tagged → tree becomes `0.3.1`
-   or `0.4.0`), so HEAD is never a lie about an already-published tag.
+   Tag shape is `v` + semver (`v0.3.0`). That commit MUST be an ancestor of
+   `origin/main`. The tag triggers:
 
-Do not retag. Do not tag from `develop` or a feature branch (the image job
-will skip or refuse). Do not skip hooks. Do not `--force` the tag.
+   - `.github/workflows/docker-publish.yml` → GHCR
+     `ghcr.io/obsidia-systems/simbus:X.Y.Z`, `:X.Y`, `:latest`, `:sha-…`
+   - `.github/workflows/release.yml` (`dist`) → GitHub Release with linux
+     amd64/arm64 and macOS aarch64 archives plus `simbus-installer.sh`
+
+8. Merge `main` back into `develop` if needed. **On `develop`**, bump
+   workspace + `AGENTS.md` to the **next** version (e.g. `0.3.0` tagged →
+   tree becomes `0.3.1` or `0.4.0`) so `develop` is never a lie about an
+   already-published tag. Leave `main` at the shipped semver.
+
+Do not retag. Do not tag from `develop` or a feature branch (GHCR and dist
+refuse tags that are not on `main`). Do not skip hooks. Do not `--force` the
+tag.
 
 Ask the user before committing, tagging, or pushing.
 

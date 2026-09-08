@@ -101,8 +101,19 @@ curl http://localhost:8000/status
 ```bash
 git clone https://github.com/obsidia-systems/simbus.git
 cd simbus
-cargo run -p runtime -- --file devices/builtin/generic-tnh-sensor.yaml --port 502 --api-port 8000
+git checkout develop
+cargo run -p simbus -- --file devices/builtin/generic-tnh-sensor.yaml --port 502 --api-port 8000
 ```
+
+Native binaries (linux amd64/arm64, macOS Apple Silicon) and a shell installer
+ship on [GitHub Releases](https://github.com/obsidia-systems/simbus/releases)
+when a `v*` tag lands on `main`:
+
+```bash
+curl --proto '=https' --tlsv1.2 -LsSf https://github.com/obsidia-systems/simbus/releases/latest/download/simbus-installer.sh | sh
+```
+
+Until the first tag of this tree, use `cargo build -p simbus`.
 
 > [!NOTE]
 > **Requirements:** Rust 1.85+ (MSRV; edition 2024). Toolchain file tracks
@@ -178,13 +189,13 @@ Contribute them with a pull request. There is no Rust test per YAML file — val
 locally with `simbus check`, and CI runs the same command on every file under `devices/`.
 
 ```bash
-cargo run -p runtime -- check devices/community/papouch-th2e.yaml
+cargo run -p simbus -- check devices/community/papouch-th2e.yaml
 ```
 
 Then run it like any other map:
 
 ```bash
-cargo run -p runtime -- --file ./devices/community/papouch-th2e.yaml --port 512 --api-port 8000
+cargo run -p simbus -- --file ./devices/community/papouch-th2e.yaml --port 512 --api-port 8000
 ```
 
 ---
@@ -563,7 +574,7 @@ alarms:
 prints a summary of what would be configured. It does not start Modbus or the API.
 
 ```bash
-cargo run -p runtime -- check devices/community/papouch-th2e.yaml
+cargo run -p simbus -- check devices/community/papouch-th2e.yaml
 ```
 
 ```text
@@ -625,13 +636,17 @@ Typical events include:
 - `simulation tick health` when `SIMBUS_TICK_HEALTH_LOG_INTERVAL` is > 0 (`tick_interval`, `time_scale`, `tick_duration_ms`, `loop_drift_ms`, `sse_subscribers`, `active_faults`, `uptime_s`)
 
 ```bash
-RUST_LOG=info cargo run -p runtime -- --file devices/builtin/generic-tnh-sensor.yaml
-RUST_LOG=engine=debug,modbus=info cargo run -p runtime -- --file devices/builtin/generic-ups.yaml
+RUST_LOG=info cargo run -p simbus -- --file devices/builtin/generic-tnh-sensor.yaml
+RUST_LOG=engine=debug,modbus=info cargo run -p simbus -- --file devices/builtin/generic-ups.yaml
 ```
 
 ---
 
 ## Docker
+
+Published images: `ghcr.io/obsidia-systems/simbus` (`:X.Y.Z`, `:X.Y`, `:latest`).
+A tag `v*` on `main` builds them. Until the first tag of this tree, build locally
+(`docker build -t simbus:latest .`).
 
 ### Single device
 
@@ -680,14 +695,14 @@ their YAML by default. For example, the Papouch TH2E keeps its real device port
 ```bash
 git clone https://github.com/obsidia-systems/simbus.git
 cd simbus
-cargo build -p runtime
+cargo build -p simbus
 ```
 
 ### Run tests
 
 ```bash
 cargo test --workspace --locked
-cargo test -p spec -p engine -p control -p modbus -p runtime --locked
+cargo test -p spec -p engine -p control -p modbus -p simbus --locked
 cargo fmt --all -- --check
 cargo clippy --workspace --all-targets --locked -- -D warnings
 ```
@@ -695,11 +710,11 @@ cargo clippy --workspace --all-targets --locked -- -D warnings
 ### Run locally
 
 ```bash
-cargo run -p runtime --                                          # default template
-cargo run -p runtime -- --file devices/builtin/generic-ups.yaml --port 502 --api-port 8000
-cargo run -p runtime -- --file devices/community/papouch-th2e.yaml --port 512 --api-port 8000
-cargo run -p runtime -- check devices/community/papouch-th2e.yaml
-cargo run -p runtime -- ctl status
+cargo run -p simbus --                                          # default template
+cargo run -p simbus -- --file devices/builtin/generic-ups.yaml --port 502 --api-port 8000
+cargo run -p simbus -- --file devices/community/papouch-th2e.yaml --port 512 --api-port 8000
+cargo run -p simbus -- check devices/community/papouch-th2e.yaml
+cargo run -p simbus -- ctl status
 ```
 
 OpenAPI UI: [http://localhost:8000/docs](http://localhost:8000/docs)
@@ -720,7 +735,9 @@ simbus/
 │   ├── builtin/            default.yaml + 7 product-shaped templates
 │   └── community/          contributor maps (papouch-th2e.yaml)
 ├── docs/                   contracts (spec, runtime, modbus, control, …)
-├── .github/workflows/      CI + GHCR image publish
+├── .github/workflows/      CI + GHCR + dist release
+├── dist-workspace.toml     dist (GitHub Release binaries)
+├── CONTRIBUTING.md         GitFlow (PR to develop)
 ├── Dockerfile
 ├── docker-compose.yml      7 builtin services + 4 Papouch (profiles)
 ├── rust-toolchain.toml
@@ -737,7 +754,7 @@ simbus/
 There is no `scenarios/` folder and no Python tree. Bundled scenarios live in
 each device YAML (`scenarios:`). Crate tests: [docs/architecture.md](docs/architecture.md)
 §2. Run them with `cargo test -p spec` (or `engine`, `control`, `modbus`,
-`runtime`).
+`simbus`).
 
 ### Documentation
 
@@ -767,11 +784,11 @@ New protocols and new YAML fields start in `docs/spec.md` and `crates/spec`.
 
 Contributions are welcome. Open an issue first to discuss significant changes.
 
-1. Fork the repository
-2. Create a feature branch (`git checkout -b feature/my-device`)
-3. Spec-first: change `docs/spec.md` and `crates/spec` for language changes. Architecture/process: `docs/architecture.md` / `docs/runtime.md`. For a community YAML, run `simbus check`
-4. Run `cargo test --workspace --locked` and `cargo clippy --workspace --all-targets --locked -- -D warnings`
-5. Open a pull request
+Work lands on **`develop`**. Open a `feature/<slug>` branch from `develop` and
+open the pull request **against `develop`**, not `main`. `main` is the last
+published tree (PR from `develop`, then tag `vX.Y.Z`). Full branch model, CI
+gate, and spec-first notes: **[CONTRIBUTING.md](CONTRIBUTING.md)**. Release
+steps for agents: [AGENTS.md](AGENTS.md) § Release.
 
 ---
 
