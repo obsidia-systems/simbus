@@ -116,50 +116,100 @@ impl RegisterBank {
         self.map(space).get(&address).map(|c| c.scale)
     }
 
-    /// Write 16-bit words starting at `address` (Modbus FC6/FC16).
+    /// Owning cell base and word offset for a PDU address.
     ///
-    /// The stream MUST be consumed by cells that start at the cursor. A hole,
-    /// a write that begins mid-cell, or a short write into a two-word type
-    /// returns `Err` with the failing address and changes nothing.
+    /// A `float32`/`uint32` at `N` occupies PDU addresses `N` and `N+1`
+    /// (V1.1b3: each address is a 16-bit register).
+    fn owner(&self, space: RegisterSpace, address: u16) -> Option<(u16, usize)> {
+        let map = self.map(space);
+        if map.contains_key(&address) {
+            return Some((address, 0));
+        }
+        let prev = address.checked_sub(1)?;
+        let cell = map.get(&prev)?;
+        if cell.value.data_type().word_count() == 2 {
+            Some((prev, 1))
+        } else {
+            None
+        }
+    }
+
+    /// Whether PDU address `address` is an implemented 16-bit register.
+    #[must_use]
+    pub fn covers_word(&self, space: RegisterSpace, address: u16) -> bool {
+        self.owner(space, address).is_some()
+    }
+
+    /// V1.1b3 §7 exception 02: start and start+quantity must all be implemented.
+    pub fn check_word_range(
+        &self,
+        space: RegisterSpace,
+        address: u16,
+        count: u16,
+    ) -> Result<(), u16> {
+        if count == 0 {
+            return Err(address);
+        }
+        for i in 0..count {
+            let addr = address.checked_add(i).ok_or(address)?;
+            if !self.covers_word(space, addr) {
+                return Err(addr);
+            }
+        }
+        Ok(())
+    }
+
+    fn check_bit_range(
+        &self,
+        present: &BTreeMap<u16, bool>,
+        address: u16,
+        count: u16,
+    ) -> Result<(), u16> {
+        if count == 0 {
+            return Err(address);
+        }
+        for i in 0..count {
+            let addr = address.checked_add(i).ok_or(address)?;
+            if !present.contains_key(&addr) {
+                return Err(addr);
+            }
+        }
+        Ok(())
+    }
+
+    /// Write 16-bit words (FC6/FC16). Each PDU address is an independent u16.
+    ///
+    /// The whole range is validated first (exception 02, no partial apply), then
+    /// each word is spliced into its owning cell.
     pub fn write_words(
         &mut self,
         space: RegisterSpace,
         address: u16,
         words: &[u16],
     ) -> Result<Vec<u16>, u16> {
-        if words.is_empty() {
-            return Err(address);
-        }
-        let mut cursor = address;
-        let mut remaining = words;
-        let mut plan = Vec::new();
-        loop {
-            let Some(cell) = self.map(space).get(&cursor) else {
-                return Err(cursor);
-            };
-            let wc = usize::from(cell.value.data_type().word_count());
-            if remaining.len() < wc {
-                return Err(cursor);
+        let count = u16::try_from(words.len()).map_err(|_| address)?;
+        self.check_word_range(space, address, count)?;
+        let endianness = self.endianness;
+        let mut written = Vec::new();
+        for (i, word) in words.iter().enumerate() {
+            let addr = address.saturating_add(i as u16);
+            let (base, offset) = self.owner(space, addr).ok_or(addr)?;
+            let cell = self.map(space).get(&base).ok_or(addr)?;
+            let data_type = cell.value.data_type();
+            let mut encoded = encode_words(cell.value, endianness);
+            encoded[offset] = *word;
+            let decoded = decode_words(&encoded, data_type, endianness);
+            if let Some(slot) = self.map_mut(space).get_mut(&base) {
+                slot.value = decoded;
             }
-            let decoded = decode_words(&remaining[..wc], cell.value.data_type(), self.endianness);
-            plan.push((cursor, decoded));
-            remaining = &remaining[wc..];
-            if remaining.is_empty() {
-                break;
-            }
-            cursor = cursor.checked_add(wc as u16).ok_or(cursor)?;
-        }
-        let mut written = Vec::with_capacity(plan.len());
-        for (addr, value) in plan {
-            if let Some(slot) = self.map_mut(space).get_mut(&addr) {
-                slot.value = value;
-                written.push(addr);
+            if !written.contains(&base) {
+                written.push(base);
             }
         }
         Ok(written)
     }
 
-    /// Read `count` 16-bit words. Unmapped addresses return 0.
+    /// Read `count` 16-bit words. Caller MUST have checked the range.
     #[must_use]
     pub fn read_words(&self, space: RegisterSpace, address: u16, count: u16) -> Vec<u16> {
         let mut out = vec![0_u16; count as usize];
@@ -217,12 +267,22 @@ impl RegisterBank {
         self.discrete.contains_key(&address)
     }
 
-    /// Read `count` coils.
+    /// Read `count` coils. Caller MUST have checked the range.
     #[must_use]
     pub fn read_coils(&self, address: u16, count: u16) -> Vec<bool> {
         (0..count)
             .map(|i| self.get_coil(address.saturating_add(i)))
             .collect()
+    }
+
+    /// V1.1b3 §7: every coil in the range must exist.
+    pub fn check_coil_range(&self, address: u16, count: u16) -> Result<(), u16> {
+        self.check_bit_range(&self.coils, address, count)
+    }
+
+    /// V1.1b3 §7: every discrete in the range must exist.
+    pub fn check_discrete_range(&self, address: u16, count: u16) -> Result<(), u16> {
+        self.check_bit_range(&self.discrete, address, count)
     }
 
     /// Write coils starting at `address`. Every bit must exist; otherwise

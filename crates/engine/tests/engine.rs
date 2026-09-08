@@ -473,7 +473,7 @@ fn write_words_rejects_holes_without_partial_apply() {
 }
 
 #[test]
-fn write_words_rejects_partial_float32() {
+fn write_words_splices_one_word_of_float32() {
     let spec = spec::load_device_from_str(
         r"
 name: f32
@@ -494,16 +494,20 @@ registers:
     )
     .unwrap();
     let device = Device::new(spec, Some(1), 1.0);
-    assert!(
-        device
-            .write_words(RegisterSpace::Holding, 0, &[0x3f80], "test")
-            .is_err()
+    let default = engine::encode_words(
+        engine::real_to_raw(1.0, 1, spec::DataType::Float32),
+        spec::Endianness::Big,
     );
-    assert!(
-        device
-            .write_words(RegisterSpace::Holding, 1, &[0], "test")
-            .is_err()
-    );
+    device
+        .write_words(RegisterSpace::Holding, 0, &[0x3f80], "test")
+        .unwrap();
+    let snap = device.snapshot();
+    assert_eq!(snap.holding.get(&0), Some(&0x3f80));
+    assert_eq!(snap.holding.get(&1), Some(&default[1]));
+    device
+        .write_words(RegisterSpace::Holding, 1, &[0x0001], "test")
+        .unwrap();
+    assert_eq!(device.snapshot().holding.get(&1), Some(&0x0001));
     let words = engine::encode_words(
         engine::real_to_raw(18.5, 1, spec::DataType::Float32),
         spec::Endianness::Big,
@@ -514,6 +518,20 @@ registers:
     let snap = device.tick(1.0);
     assert_eq!(snap.holding.get(&0), Some(&words[0]));
     assert_eq!(snap.holding.get(&1), Some(&words[1]));
+}
+
+#[test]
+fn read_words_rejects_a_range_with_a_hole() {
+    let device = Device::new(two_holdings(), Some(1), 1.0);
+    let err = device.read_words(RegisterSpace::Holding, 0, 3).unwrap_err();
+    assert!(matches!(
+        err,
+        engine::DeviceError::UnknownRegister { address: 2, .. }
+    ));
+    assert_eq!(
+        device.read_words(RegisterSpace::Holding, 0, 2).unwrap(),
+        vec![1, 2]
+    );
 }
 
 #[test]

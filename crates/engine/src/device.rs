@@ -199,10 +199,19 @@ impl Device {
         self.inner.read().bank.snapshot()
     }
 
-    /// Read Modbus words.
-    #[must_use]
-    pub fn read_words(&self, space: RegisterSpace, address: u16, count: u16) -> Vec<u16> {
-        self.inner.read().bank.read_words(space, address, count)
+    /// Read Modbus words. The range must be fully implemented (V1.1b3 §7).
+    pub fn read_words(
+        &self,
+        space: RegisterSpace,
+        address: u16,
+        count: u16,
+    ) -> Result<Vec<u16>, DeviceError> {
+        let inner = self.inner.read();
+        inner
+            .bank
+            .check_word_range(space, address, count)
+            .map_err(|address| DeviceError::UnknownRegister { space, address })?;
+        Ok(inner.bank.read_words(space, address, count))
     }
 
     /// Write Modbus words and shift `state.base` for every cell written.
@@ -227,10 +236,14 @@ impl Device {
         Ok(())
     }
 
-    /// Read coils.
-    #[must_use]
-    pub fn read_coils(&self, address: u16, count: u16) -> Vec<bool> {
-        self.inner.read().bank.read_coils(address, count)
+    /// Read coils. The range must be fully implemented (V1.1b3 §7).
+    pub fn read_coils(&self, address: u16, count: u16) -> Result<Vec<bool>, DeviceError> {
+        let inner = self.inner.read();
+        inner
+            .bank
+            .check_coil_range(address, count)
+            .map_err(|address| DeviceError::UnknownCoilAddress { address })?;
+        Ok(inner.bank.read_coils(address, count))
     }
 
     /// Write coils. Every address in the range must exist.
@@ -242,10 +255,14 @@ impl Device {
             .map_err(|address| DeviceError::UnknownCoilAddress { address })
     }
 
-    /// Read discrete inputs.
-    #[must_use]
-    pub fn read_discrete(&self, address: u16, count: u16) -> Vec<bool> {
-        self.inner.read().bank.read_discrete(address, count)
+    /// Read discrete inputs. The range must be fully implemented (V1.1b3 §7).
+    pub fn read_discrete(&self, address: u16, count: u16) -> Result<Vec<bool>, DeviceError> {
+        let inner = self.inner.read();
+        inner
+            .bank
+            .check_discrete_range(address, count)
+            .map_err(|address| DeviceError::UnknownCoilAddress { address })?;
+        Ok(inner.bank.read_discrete(address, count))
     }
 
     /// Override a register from the control API.

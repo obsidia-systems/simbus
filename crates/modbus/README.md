@@ -1,10 +1,11 @@
 # modbus
 
-Modbus TCP field plane for one `engine` device. Contract: [`docs/modbus.md`](../../docs/modbus.md).
+Modbus TCP field plane for one `engine` device. Contract:
+[`docs/modbus.md`](../../docs/modbus.md) (V1.1b3 PDU + V1.0b MBAP).
 
-FC1–FC4 reads (holes are `0` / `false`). FC5/FC6/FC15/FC16 writes are
-all-or-nothing (`IllegalDataAddress` on holes or a partial multi-word cell).
-The MBAP unit id must match YAML `unit_id`; a mismatch is ignored (`Ok(None)`).
+FC1–FC4 / 5 / 6 / 15 / 16. A range that includes an unimplemented address
+is exception 02. Quantity 0 or above the spec max is exception 03. Each PDU
+address is a 16-bit register. Native TCP does not filter on unit id.
 RTU / TLS are specified in [`docs/spec.md`](../../docs/spec.md) and not served.
 
 ## Tests
@@ -13,5 +14,5 @@ RTU / TLS are specified in [`docs/spec.md`](../../docs/spec.md) and not served.
 cargo test -p modbus --locked
 ```
 
-- FC3 T&H defaults (225 / 450); FC6 `update_base`; FC16 adjacent uint16 and float32
-- Illegal address (hole, mid-float, extra coil); quantity 0; unit-id filter
+- FC3 T&H defaults; FC3 past the map → 02; FC6 `update_base`; FC16 adjacent uint16
+- FC6 splices one word of a float32 pair; quantity 0 → 03; extra coil → 02

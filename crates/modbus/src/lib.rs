@@ -1,4 +1,8 @@
 //! Modbus TCP slave backed by a simbus device.
+//!
+//! Wire behavior follows:
+//! - MODBUS Application Protocol Specification V1.1b3
+//! - MODBUS Messaging on TCP/IP Implementation Guide V1.0b
 
 use std::future;
 use std::io;
@@ -14,7 +18,7 @@ use tokio_modbus::server::Service;
 use tokio_modbus::server::tcp::{Server, accept_tcp_connection};
 use tracing::info;
 
-/// Modbus TCP quantity limits (IEC 61131 / typical stacks).
+/// V1.1b3 quantity maxima (PDU size inherited from the 256-byte serial ADU).
 const MAX_READ_REGS: u16 = 125;
 const MAX_WRITE_REGS: u16 = 123;
 const MAX_READ_BITS: u16 = 2000;
@@ -27,27 +31,23 @@ pub struct ModbusBinding {
     pub ready: Arc<AtomicBool>,
     /// Bound TCP port.
     pub port: u16,
-    /// Unit ID.
+    /// YAML unit id (identity / future RTU). Not used to filter TCP.
     pub unit_id: u8,
 }
 
 #[derive(Clone)]
 struct DeviceService {
     device: Arc<Device>,
-    unit_id: u8,
 }
 
 impl Service for DeviceService {
-    type Request = SlaveRequest<'static>;
-    type Response = Option<Response>;
+    type Request = Request<'static>;
+    type Response = Response;
     type Exception = ExceptionCode;
-    type Future = future::Ready<Result<Option<Response>, ExceptionCode>>;
+    type Future = future::Ready<Result<Response, ExceptionCode>>;
 
-    fn call(&self, req: SlaveRequest<'static>) -> Self::Future {
-        if req.slave != self.unit_id {
-            return future::ready(Ok(None));
-        }
-        future::ready(self.handle(req.request).map(Some))
+    fn call(&self, req: Request<'static>) -> Self::Future {
+        future::ready(self.handle(req))
     }
 }
 
@@ -56,49 +56,47 @@ impl DeviceService {
         match req {
             Request::ReadCoils(addr, cnt) => {
                 check_qty(cnt, MAX_READ_BITS)?;
-                Ok(Response::ReadCoils(self.device.read_coils(addr, cnt)))
+                Ok(Response::ReadCoils(
+                    self.device.read_coils(addr, cnt).map_err(exception)?,
+                ))
             }
             Request::ReadDiscreteInputs(addr, cnt) => {
                 check_qty(cnt, MAX_READ_BITS)?;
                 Ok(Response::ReadDiscreteInputs(
-                    self.device.read_discrete(addr, cnt),
+                    self.device.read_discrete(addr, cnt).map_err(exception)?,
                 ))
             }
             Request::ReadHoldingRegisters(addr, cnt) => {
                 check_qty(cnt, MAX_READ_REGS)?;
-                Ok(Response::ReadHoldingRegisters(self.device.read_words(
-                    RegisterSpace::Holding,
-                    addr,
-                    cnt,
-                )))
+                Ok(Response::ReadHoldingRegisters(
+                    self.device
+                        .read_words(RegisterSpace::Holding, addr, cnt)
+                        .map_err(exception)?,
+                ))
             }
             Request::ReadInputRegisters(addr, cnt) => {
                 check_qty(cnt, MAX_READ_REGS)?;
-                Ok(Response::ReadInputRegisters(self.device.read_words(
-                    RegisterSpace::Input,
-                    addr,
-                    cnt,
-                )))
+                Ok(Response::ReadInputRegisters(
+                    self.device
+                        .read_words(RegisterSpace::Input, addr, cnt)
+                        .map_err(exception)?,
+                ))
             }
             Request::WriteSingleCoil(addr, value) => {
-                self.device
-                    .write_coils(addr, &[value])
-                    .map_err(write_exception)?;
+                self.device.write_coils(addr, &[value]).map_err(exception)?;
                 Ok(Response::WriteSingleCoil(addr, value))
             }
             Request::WriteMultipleCoils(addr, values) => {
                 let n = u16::try_from(values.len()).unwrap_or(u16::MAX);
                 check_qty(n, MAX_WRITE_BITS)?;
                 let values = values.to_vec();
-                self.device
-                    .write_coils(addr, &values)
-                    .map_err(write_exception)?;
+                self.device.write_coils(addr, &values).map_err(exception)?;
                 Ok(Response::WriteMultipleCoils(addr, n))
             }
             Request::WriteSingleRegister(addr, value) => {
                 self.device
                     .write_words(RegisterSpace::Holding, addr, &[value], "modbus")
-                    .map_err(write_exception)?;
+                    .map_err(exception)?;
                 Ok(Response::WriteSingleRegister(addr, value))
             }
             Request::WriteMultipleRegisters(addr, values) => {
@@ -107,7 +105,7 @@ impl DeviceService {
                 let values = values.to_vec();
                 self.device
                     .write_words(RegisterSpace::Holding, addr, &values, "modbus")
-                    .map_err(write_exception)?;
+                    .map_err(exception)?;
                 Ok(Response::WriteMultipleRegisters(addr, n))
             }
             _ => Err(ExceptionCode::IllegalFunction),
@@ -123,7 +121,7 @@ fn check_qty(cnt: u16, max: u16) -> Result<(), ExceptionCode> {
     }
 }
 
-fn write_exception(err: DeviceError) -> ExceptionCode {
+fn exception(err: DeviceError) -> ExceptionCode {
     match err {
         DeviceError::UnknownRegister { .. }
         | DeviceError::UnknownCoilAddress { .. }
@@ -146,7 +144,7 @@ pub async fn serve(
     info!(port = bound.port(), unit_id, "modbus server listening");
 
     let server = Server::new(listener);
-    let service = DeviceService { device, unit_id };
+    let service = DeviceService { device };
     let new_service = move |_addr: SocketAddr| Ok(Some(service.clone()));
     let on_connected = move |stream, socket_addr| {
         let new_service = new_service.clone();
@@ -175,7 +173,7 @@ mod tests {
     }
 
     fn svc(device: Arc<Device>) -> DeviceService {
-        DeviceService { device, unit_id: 1 }
+        DeviceService { device }
     }
 
     fn holding(svc: &DeviceService, addr: u16, cnt: u16) -> Vec<u16> {
@@ -188,9 +186,40 @@ mod tests {
         words
     }
 
+    fn float32_device() -> DeviceService {
+        let spec = load_device_from_str(
+            r"
+name: f32
+version: '1.0'
+type: x
+modbus:
+  default_port: 502
+registers:
+  holding:
+    - address: 0
+      name: value
+      default: 1.0
+      scale: 1
+      data_type: float32
+      simulation:
+        behavior: constant
+",
+        )
+        .unwrap();
+        svc(Device::new(spec, Some(1), 1.0))
+    }
+
     #[test]
     fn fc3_reads_scaled_defaults() {
         assert_eq!(holding(&svc(tnh()), 0, 2), vec![225, 450]);
+    }
+
+    #[test]
+    fn fc3_past_the_map_is_illegal_address() {
+        let err = svc(tnh())
+            .handle(Request::ReadHoldingRegisters(0, 3))
+            .expect_err("qty covers a hole");
+        assert_eq!(err, ExceptionCode::IllegalDataAddress);
     }
 
     #[test]
@@ -214,26 +243,7 @@ mod tests {
 
     #[test]
     fn fc16_writes_float32_pair() {
-        let spec = load_device_from_str(
-            r"
-name: f32
-version: '1.0'
-type: x
-modbus:
-  default_port: 502
-registers:
-  holding:
-    - address: 0
-      name: value
-      default: 1.0
-      scale: 1
-      data_type: float32
-      simulation:
-        behavior: constant
-",
-        )
-        .unwrap();
-        let svc = svc(Device::new(spec, Some(1), 1.0));
+        let svc = float32_device();
         let words = encode_words(real_to_raw(18.5, 1, DataType::Float32), Endianness::Big);
         svc.handle(Request::WriteMultipleRegisters(
             0,
@@ -244,35 +254,15 @@ registers:
     }
 
     #[test]
-    fn fc6_into_float32_is_illegal_address() {
-        let spec = load_device_from_str(
-            r"
-name: f32
-version: '1.0'
-type: x
-modbus:
-  default_port: 502
-registers:
-  holding:
-    - address: 0
-      name: value
-      default: 1.0
-      scale: 1
-      data_type: float32
-      simulation:
-        behavior: constant
-",
-        )
-        .unwrap();
-        let svc = svc(Device::new(spec, Some(1), 1.0));
-        let err = svc
-            .handle(Request::WriteSingleRegister(0, 1))
-            .expect_err("partial float32");
-        assert_eq!(err, ExceptionCode::IllegalDataAddress);
-        assert_eq!(
-            holding(&svc, 0, 2),
-            encode_words(real_to_raw(1.0, 1, DataType::Float32), Endianness::Big)
-        );
+    fn fc6_splices_one_word_of_float32() {
+        let svc = float32_device();
+        let default = encode_words(real_to_raw(1.0, 1, DataType::Float32), Endianness::Big);
+        svc.handle(Request::WriteSingleRegister(0, 0x3f80))
+            .expect("fc6 first word");
+        assert_eq!(holding(&svc, 0, 2), vec![0x3f80, default[1]]);
+        svc.handle(Request::WriteSingleRegister(1, 0x0001))
+            .expect("fc6 second word");
+        assert_eq!(holding(&svc, 1, 1), vec![0x0001]);
     }
 
     #[test]
@@ -286,37 +276,8 @@ registers:
     }
 
     #[test]
-    fn write_mid_float_is_illegal_address() {
-        let spec = load_device_from_str(
-            r"
-name: f32
-version: '1.0'
-type: x
-modbus:
-  default_port: 502
-registers:
-  holding:
-    - address: 0
-      name: value
-      default: 1.0
-      scale: 1
-      data_type: float32
-      simulation:
-        behavior: constant
-",
-        )
-        .unwrap();
-        let svc = svc(Device::new(spec, Some(1), 1.0));
-        let err = svc
-            .handle(Request::WriteSingleRegister(1, 1))
-            .expect_err("mid-cell");
-        assert_eq!(err, ExceptionCode::IllegalDataAddress);
-    }
-
-    #[test]
     fn quantity_zero_is_illegal_value() {
-        let svc = svc(tnh());
-        let err = svc
+        let err = svc(tnh())
             .handle(Request::ReadHoldingRegisters(0, 0))
             .expect_err("qty 0");
         assert_eq!(err, ExceptionCode::IllegalDataValue);
@@ -324,38 +285,10 @@ registers:
 
     #[test]
     fn unknown_function_is_illegal_function() {
-        let svc = svc(tnh());
-        let err = svc
+        let err = svc(tnh())
             .handle(Request::ReportServerId)
             .expect_err("report server id");
         assert_eq!(err, ExceptionCode::IllegalFunction);
-    }
-
-    #[test]
-    fn wrong_unit_id_is_ignored() {
-        let svc = svc(tnh());
-        let out = svc
-            .call(SlaveRequest {
-                slave: 2,
-                request: Request::ReadHoldingRegisters(0, 2),
-            })
-            .into_inner()
-            .expect("no exception");
-        assert!(out.is_none());
-    }
-
-    #[test]
-    fn matching_unit_id_is_served() {
-        let svc = svc(tnh());
-        let out = svc
-            .call(SlaveRequest {
-                slave: 1,
-                request: Request::ReadHoldingRegisters(0, 2),
-            })
-            .into_inner()
-            .expect("ok")
-            .expect("response");
-        assert_eq!(out, Response::ReadHoldingRegisters(vec![225, 450]));
     }
 
     #[test]
@@ -372,5 +305,13 @@ registers:
             svc.handle(Request::ReadCoils(0, 2)).unwrap(),
             Response::ReadCoils(vec![false, false])
         );
+    }
+
+    #[test]
+    fn fc1_past_the_map_is_illegal_address() {
+        let err = svc(tnh())
+            .handle(Request::ReadCoils(0, 3))
+            .expect_err("qty covers a missing coil");
+        assert_eq!(err, ExceptionCode::IllegalDataAddress);
     }
 }
