@@ -116,23 +116,47 @@ impl RegisterBank {
         self.map(space).get(&address).map(|c| c.scale)
     }
 
-    /// Write 16-bit words starting at `address` (used by Modbus FC6/FC16).
-    pub fn write_words(&mut self, space: RegisterSpace, address: u16, words: &[u16]) {
-        if let Some(cell) = self.map(space).get(&address).cloned() {
-            let decoded = decode_words(words, cell.value.data_type(), self.endianness);
-            if let Some(slot) = self.map_mut(space).get_mut(&address) {
-                slot.value = decoded;
-            }
-            return;
+    /// Write 16-bit words starting at `address` (Modbus FC6/FC16).
+    ///
+    /// The stream MUST be consumed by cells that start at the cursor. A hole,
+    /// a write that begins mid-cell, or a short write into a two-word type
+    /// returns `Err` with the failing address and changes nothing.
+    pub fn write_words(
+        &mut self,
+        space: RegisterSpace,
+        address: u16,
+        words: &[u16],
+    ) -> Result<Vec<u16>, u16> {
+        if words.is_empty() {
+            return Err(address);
         }
-        // Fall back to writing individual uint16 cells that exist at each address.
-        let endianness = self.endianness;
-        for (i, word) in words.iter().enumerate() {
-            let addr = address.saturating_add(i as u16);
+        let mut cursor = address;
+        let mut remaining = words;
+        let mut plan = Vec::new();
+        loop {
+            let Some(cell) = self.map(space).get(&cursor) else {
+                return Err(cursor);
+            };
+            let wc = usize::from(cell.value.data_type().word_count());
+            if remaining.len() < wc {
+                return Err(cursor);
+            }
+            let decoded = decode_words(&remaining[..wc], cell.value.data_type(), self.endianness);
+            plan.push((cursor, decoded));
+            remaining = &remaining[wc..];
+            if remaining.is_empty() {
+                break;
+            }
+            cursor = cursor.checked_add(wc as u16).ok_or(cursor)?;
+        }
+        let mut written = Vec::with_capacity(plan.len());
+        for (addr, value) in plan {
             if let Some(slot) = self.map_mut(space).get_mut(&addr) {
-                slot.value = decode_words(&[*word], slot.value.data_type(), endianness);
+                slot.value = value;
+                written.push(addr);
             }
         }
+        Ok(written)
     }
 
     /// Read `count` 16-bit words. Unmapped addresses return 0.
@@ -201,11 +225,24 @@ impl RegisterBank {
             .collect()
     }
 
-    /// Write coils starting at `address`.
-    pub fn write_coils(&mut self, address: u16, values: &[bool]) {
-        for (i, value) in values.iter().enumerate() {
-            self.set_coil(address.saturating_add(i as u16), *value);
+    /// Write coils starting at `address`. Every bit must exist; otherwise
+    /// `Err` is the first unmapped (or overflowing) address and nothing changes.
+    pub fn write_coils(&mut self, address: u16, values: &[bool]) -> Result<(), u16> {
+        if values.is_empty() {
+            return Err(address);
         }
+        let mut addrs = Vec::with_capacity(values.len());
+        for i in 0..values.len() {
+            let addr = address.checked_add(i as u16).ok_or(address)?;
+            if !self.coils.contains_key(&addr) {
+                return Err(addr);
+            }
+            addrs.push(addr);
+        }
+        for (addr, value) in addrs.into_iter().zip(values) {
+            self.set_coil(addr, *value);
+        }
+        Ok(())
     }
 
     /// Read discrete inputs.

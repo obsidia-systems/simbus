@@ -416,3 +416,113 @@ registers:
     );
     assert_ne!(a.tick(1.0).holding.get(&0), b.tick(1.0).holding.get(&0));
 }
+
+fn two_holdings() -> spec::DeviceSpec {
+    spec::load_device_from_str(
+        r"
+name: pair
+version: '1.0'
+type: x
+modbus:
+  default_port: 502
+registers:
+  holding:
+    - address: 0
+      name: a
+      default: 1.0
+      scale: 1
+      data_type: uint16
+      simulation:
+        behavior: constant
+    - address: 1
+      name: b
+      default: 2.0
+      scale: 1
+      data_type: uint16
+      simulation:
+        behavior: constant
+",
+    )
+    .unwrap()
+}
+
+#[test]
+fn write_words_updates_adjacent_uint16_and_bases() {
+    let device = Device::new(two_holdings(), Some(1), 1.0);
+    device
+        .write_words(RegisterSpace::Holding, 0, &[10, 20], "test")
+        .unwrap();
+    let snap = device.tick(1.0);
+    assert_eq!(snap.holding.get(&0), Some(&10));
+    assert_eq!(snap.holding.get(&1), Some(&20));
+}
+
+#[test]
+fn write_words_rejects_holes_without_partial_apply() {
+    let device = Device::new(two_holdings(), Some(1), 1.0);
+    let err = device
+        .write_words(RegisterSpace::Holding, 0, &[10, 20, 30], "test")
+        .unwrap_err();
+    assert!(matches!(
+        err,
+        engine::DeviceError::UnknownRegister { address: 2, .. }
+    ));
+    let snap = device.snapshot();
+    assert_eq!(snap.holding.get(&0), Some(&1));
+    assert_eq!(snap.holding.get(&1), Some(&2));
+}
+
+#[test]
+fn write_words_rejects_partial_float32() {
+    let spec = spec::load_device_from_str(
+        r"
+name: f32
+version: '1.0'
+type: x
+modbus:
+  default_port: 502
+registers:
+  holding:
+    - address: 0
+      name: value
+      default: 1.0
+      scale: 1
+      data_type: float32
+      simulation:
+        behavior: constant
+",
+    )
+    .unwrap();
+    let device = Device::new(spec, Some(1), 1.0);
+    assert!(
+        device
+            .write_words(RegisterSpace::Holding, 0, &[0x3f80], "test")
+            .is_err()
+    );
+    assert!(
+        device
+            .write_words(RegisterSpace::Holding, 1, &[0], "test")
+            .is_err()
+    );
+    let words = engine::encode_words(
+        engine::real_to_raw(18.5, 1, spec::DataType::Float32),
+        spec::Endianness::Big,
+    );
+    device
+        .write_words(RegisterSpace::Holding, 0, &words, "test")
+        .unwrap();
+    let snap = device.tick(1.0);
+    assert_eq!(snap.holding.get(&0), Some(&words[0]));
+    assert_eq!(snap.holding.get(&1), Some(&words[1]));
+}
+
+#[test]
+fn write_coils_rejects_unmapped() {
+    let device = Device::new(tnh_spec(), Some(1), 1.0);
+    let err = device.write_coils(0, &[true, true, true]).unwrap_err();
+    assert!(matches!(
+        err,
+        engine::DeviceError::UnknownCoilAddress { address: 2 }
+    ));
+    assert_eq!(device.snapshot().coils.get(&0), Some(&false));
+}

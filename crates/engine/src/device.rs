@@ -32,9 +32,15 @@ pub enum DeviceError {
     /// Unknown register name.
     #[error("register '{0}' not found")]
     UnknownRegisterName(String),
-    /// Unknown coil or discrete.
+    /// Unknown coil or discrete name.
     #[error("coil '{0}' not found")]
     UnknownCoil(String),
+    /// Unknown coil address (field-plane write).
+    #[error("coil address {address} not found")]
+    UnknownCoilAddress {
+        /// Coil address.
+        address: u16,
+    },
 }
 
 /// Public view of an active fault.
@@ -199,14 +205,26 @@ impl Device {
         self.inner.read().bank.read_words(space, address, count)
     }
 
-    /// Write Modbus words and shift `state.base` for matching cells.
-    pub fn write_words(&self, space: RegisterSpace, address: u16, words: &[u16], source: &str) {
+    /// Write Modbus words and shift `state.base` for every cell written.
+    pub fn write_words(
+        &self,
+        space: RegisterSpace,
+        address: u16,
+        words: &[u16],
+        source: &str,
+    ) -> Result<(), DeviceError> {
         let mut inner = self.inner.write();
-        inner.bank.write_words(space, address, words);
-        if let Some(cell) = inner.bank.get_cell(space, address) {
-            let scale = inner.bank.scale(space, address).unwrap_or(1);
-            update_base_locked(&mut inner, space, address, raw_to_real(cell, scale), source);
+        let written = inner
+            .bank
+            .write_words(space, address, words)
+            .map_err(|address| DeviceError::UnknownRegister { space, address })?;
+        for addr in written {
+            if let Some(cell) = inner.bank.get_cell(space, addr) {
+                let scale = inner.bank.scale(space, addr).unwrap_or(1);
+                update_base_locked(&mut inner, space, addr, raw_to_real(cell, scale), source);
+            }
         }
+        Ok(())
     }
 
     /// Read coils.
@@ -215,9 +233,13 @@ impl Device {
         self.inner.read().bank.read_coils(address, count)
     }
 
-    /// Write coils.
-    pub fn write_coils(&self, address: u16, values: &[bool]) {
-        self.inner.write().bank.write_coils(address, values);
+    /// Write coils. Every address in the range must exist.
+    pub fn write_coils(&self, address: u16, values: &[bool]) -> Result<(), DeviceError> {
+        self.inner
+            .write()
+            .bank
+            .write_coils(address, values)
+            .map_err(|address| DeviceError::UnknownCoilAddress { address })
     }
 
     /// Read discrete inputs.

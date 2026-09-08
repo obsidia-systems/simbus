@@ -11,4 +11,4 @@ cargo test -p engine
 ```
 
 - Unit: behaviors and encode in `src/behaviors.rs` / `src/encode.rs`
-- Integration (`tests/engine.rs`): T&H defaults, faults (spike, freeze latch, dropout, alarm), triggers, `rate × dt`, reset replay, seed / identity mix
+- Integration (`tests/engine.rs`): T&H defaults, faults (spike, freeze latch, dropout, alarm), triggers, `rate × dt`, reset replay, seed / identity mix, FC16-style `write_words` (adjacent uint16, atomic holes, float32 pair)
