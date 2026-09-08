@@ -1,0 +1,66 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/spec",
+    "crates/engine",
+    "crates/control",
+    "crates/modbus",
+    "crates/runtime",
+]
+default-members = ["crates/runtime"]
+
+[workspace.package]
+version = "0.3.0"
+edition = "2024"
+rust-version = "1.85"
+license = "MIT"
+repository = "https://github.com/obsidia-systems/simbus"
+authors = ["Obsidia Systems"]
+homepage = "https://github.com/obsidia-systems/simbus"
+description = "Industrial field device simulator"
+
+[workspace.dependencies]
+spec = { path = "crates/spec", version = "0.3.0" }
+engine = { path = "crates/engine", version = "0.3.0" }
+control = { path = "crates/control", version = "0.3.0" }
+modbus = { path = "crates/modbus", version = "0.3.0" }
+
+anyhow = { version = "1.0", default-features = false, features = ["std"] }
+async-trait = { version = "0.1", default-features = false }
+axum = { version = "0.8", default-features = false, features = ["http1", "json", "tokio", "query"] }
+clap = { version = "4.5", default-features = false, features = ["derive", "env", "error-context", "help", "std", "suggestions", "usage"] }
+futures-util = { version = "0.3", default-features = false, features = ["std"] }
+http = { version = "1", default-features = false }
+parking_lot = { version = "0.12", default-features = false }
+rand = { version = "0.9", default-features = false, features = ["std", "std_rng", "thread_rng"] }
+rand_distr = { version = "0.5", default-features = false, features = ["std"] }
+serde = { version = "1.0", default-features = false, features = ["derive", "std"] }
+serde_json = { version = "1.0", default-features = false, features = ["std"] }
+serde_yaml = { version = "0.9", default-features = false }
+thiserror = { version = "2.0", default-features = false }
+tokio = { version = "1.47", default-features = false, features = ["io-util", "macros", "net", "rt-multi-thread", "signal", "sync", "time"] }
+tokio-modbus = { version = "0.17", default-features = false }
+tokio-stream = { version = "0.1", default-features = false, features = ["sync", "time"] }
+tower-http = { version = "0.6", default-features = false, features = ["cors", "timeout", "trace"] }
+tracing = { version = "0.1", default-features = false, features = ["std"] }
+tracing-subscriber = { version = "0.3", default-features = false, features = ["env-filter", "fmt", "std"] }
+utoipa = { version = "5.4", default-features = false, features = ["macros"] }
+utoipa-swagger-ui = { version = "9.0", default-features = false, features = ["axum"] }
+http-body-util = { version = "0.1", default-features = false }
+tower = { version = "0.5", default-features = false, features = ["util"] }
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+unreachable_pub = "allow"
+
+[workspace.lints.rustdoc]
+broken_intra_doc_links = "deny"
+
+[workspace.lints.clippy]
+all = { level = "deny", priority = -1 }
+pedantic = { level = "allow", priority = -1 }
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = "symbols"

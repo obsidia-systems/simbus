@@ -5,15 +5,12 @@
 Simulate realistic Modbus TCP field devices for SCADA labs, integration testing,
 and operator training — **no hardware required**.
 
-[![Python 3.14](https://img.shields.io/badge/python-3.14+-3776AB?style=flat-square&logo=python&logoColor=white)](https://www.python.org/)
+[![Rust 1.85+](https://img.shields.io/badge/rust-1.85+-DEA584?style=flat-square&logo=rust&logoColor=white)](https://www.rust-lang.org/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-yellow?style=flat-square)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-188%20passing-22c55e?style=flat-square&logo=pytest&logoColor=white)](#development)
-[![Coverage](https://img.shields.io/badge/coverage-97%25-22c55e?style=flat-square)](#development)
 [![Docker](https://img.shields.io/badge/docker-ready-2496ED?style=flat-square&logo=docker&logoColor=white)](#docker)
 [![Modbus TCP](https://img.shields.io/badge/protocol-Modbus%20TCP-FF6B35?style=flat-square)](#architecture)
-[![pymodbus](https://img.shields.io/badge/pymodbus-3.12.x-blueviolet?style=flat-square)](https://github.com/pymodbus-dev/pymodbus)
-[![FastAPI](https://img.shields.io/badge/FastAPI-0.135-009688?style=flat-square&logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
-[![uv](https://img.shields.io/badge/uv-managed-DE5FE9?style=flat-square)](https://docs.astral.sh/uv/)
+[![tokio-modbus](https://img.shields.io/badge/tokio--modbus-0.17-blueviolet?style=flat-square)](https://github.com/slowtec/tokio-modbus)
+[![axum](https://img.shields.io/badge/axum-0.8-009688?style=flat-square)](https://github.com/tokio-rs/axum)
 
 > **Each container = one device.** Modbus TCP server + simulation engine + REST control API.
 > Stack as many as you need. Works with Ignition, Wonderware, FactoryTalk, and any Modbus client.
@@ -53,6 +50,7 @@ static, hard to script, or impossible to containerize. **simbus** was built to f
 
 - [Quick Start](#quick-start)
 - [Built-in Devices](#built-in-devices)
+- [Community devices](#community-devices)
 - [Architecture](#architecture)
 - [Simulation Behaviors](#simulation-behaviors)
 - [Scenarios](#scenarios)
@@ -60,6 +58,7 @@ static, hard to script, or impossible to containerize. **simbus** was built to f
 - [Fault Injection](#fault-injection)
 - [Connecting to Ignition](#connecting-to-ignition)
 - [Device YAML Schema](#device-yaml-schema)
+- [Validating a device YAML](#validating-a-device-yaml)
 - [Configuration](#configuration)
 - [Logging](#logging)
 - [Docker](#docker)
@@ -97,33 +96,44 @@ curl http://localhost:8000/status
 }
 ```
 
-### With uv
+### From source (Rust)
 
 ```bash
-git clone https://github.com/your-org/simbus.git
+git clone https://github.com/obsidia-systems/simbus.git
 cd simbus
-uv sync
-simbus --type generic-tnh-sensor --port 502 --api-port 8000
+cargo run -p runtime -- --file devices/builtin/generic-tnh-sensor.yaml --port 502 --api-port 8000
 ```
 
-> **Requirements:** Python 3.14+, Docker (optional)
+> **Requirements:** Rust 1.85+ (edition 2024), Docker (optional)
 
 ---
 
 ## Built-in Devices
 
-Seven devices ship ready to use. Each has a realistic register map, trigger-based alarms,
+simbus is a generic measurement engine. Official maps under `devices/builtin/`
+are **templates**: point `--file` at one of them. With no file, simbus boots
+`devices/builtin/default.yaml` (an example device, not a product). Vendor or
+site-specific maps belong in `devices/community/` — see
+[Community devices](#community-devices).
+
+```bash
+simbus
+simbus --file devices/builtin/generic-ups.yaml
+simbus --file devices/community/papouch-th2e.yaml
+```
+
+Seven product-shaped templates ship ready to use. Each has a realistic register map, trigger-based alarms,
 and physics-appropriate simulation.
 
-| Device | Type key | Device Modbus | Device API | Example host map | Holding | Coils |
+| Device | YAML | Device Modbus | Device API | Example host map | Holding | Coils |
 | --- | --- | --- | --- | --- | --- | --- |
-| 🌡️ T&H Sensor | `generic-tnh-sensor` | 502 | 8000 | `5020:502`, `8000:8000` | 2 | 2 |
-| 🔋 UPS | `generic-ups` | 502 | 8000 | `5021:502`, `8001:8000` | 6 | 4 |
-| ⚡ PDU | `generic-pdu` | 502 | 8000 | `5022:502`, `8002:8000` | 6 | 3 |
-| ❄️ CRAC Unit | `generic-crac` | 502 | 8000 | `5023:502`, `8003:8000` | 6 | 4 + 1 discrete |
-| 📊 Power Meter | `generic-power-meter` | 502 | 8000 | `5024:502`, `8004:8000` | 12 | 3 |
-| 💧 Leak Sensor | `generic-leak-sensor` | 502 | 8000 | `5025:502`, `8005:8000` | 4 | 3 + 1 discrete |
-| 🚪 Door Contact | `generic-door-contact` | 502 | 8000 | `5026:502`, `8006:8000` | 3 | 4 + 2 discrete |
+| 🌡️ T&H Sensor | `devices/builtin/generic-tnh-sensor.yaml` | 502 | 8000 | `5020:502`, `8000:8000` | 2 | 2 |
+| 🔋 UPS | `devices/builtin/generic-ups.yaml` | 502 | 8000 | `5021:502`, `8001:8000` | 6 | 4 |
+| ⚡ PDU | `devices/builtin/generic-pdu.yaml` | 502 | 8000 | `5022:502`, `8002:8000` | 6 | 3 |
+| ❄️ CRAC Unit | `devices/builtin/generic-crac.yaml` | 502 | 8000 | `5023:502`, `8003:8000` | 6 | 4 + 1 discrete |
+| 📊 Power Meter | `devices/builtin/generic-power-meter.yaml` | 502 | 8000 | `5024:502`, `8004:8000` | 12 | 3 |
+| 💧 Leak Sensor | `devices/builtin/generic-leak-sensor.yaml` | 502 | 8000 | `5025:502`, `8005:8000` | 4 | 3 + 1 discrete |
+| 🚪 Door Contact | `devices/builtin/generic-door-contact.yaml` | 502 | 8000 | `5026:502`, `8006:8000` | 3 | 4 + 2 discrete |
 
 Inspect any running device's full register map:
 
@@ -151,16 +161,34 @@ curl http://localhost:8000/config
 
 ---
 
+## Community devices
+
+Named products and lab-specific maps live in [`devices/community/`](devices/community/).
+Contribute them with a pull request. There is no Rust test per YAML file — validate
+locally with `simbus check`, and CI runs the same command on every file under `devices/`.
+
+```bash
+cargo run -p runtime -- check devices/community/papouch-th2e.yaml
+```
+
+Then run it like any other map:
+
+```bash
+cargo run -p runtime -- --file ./devices/community/papouch-th2e.yaml --port 512 --api-port 8000
+```
+
+---
+
 ## Architecture
 
 ```mermaid
 flowchart TB
     subgraph container["🐳 Container — one per device"]
         direction TB
-        engine["⚙️ SimulationEngine\nasync tick loop"]
-        store[("📦 RegisterStore\nin-memory dict")]
-        modbus["🔌 Modbus TCP Server\npymodbus 3.12.x"]
-        api["🌐 FastAPI\nREST + SSE"]
+        engine["⚙️ engine\ntick loop"]
+        store[("📦 RegisterBank\nin-memory")]
+        modbus["🔌 Modbus TCP\ntokio-modbus"]
+        api["🌐 axum\nREST + SSE"]
         scenario["📜 ScenarioRunner\ntimed event replay"]
 
         engine -- "writes every tick" --> store
@@ -197,24 +225,17 @@ flowchart LR
     I --> J[push SSE snapshot]
 ```
 
-### No locks, no database
+### Shared bank, no second store
 
-```mermaid
-flowchart LR
-    A["asyncio event loop\n(single thread)"] --> B["SimulationEngine._tick()\nno await — atomic"]
-    A --> C["Modbus DataBlock.getValues()\nno await — atomic"]
-    A --> D["FastAPI route handler\nno await — atomic"]
-    B & C & D --> E[("RegisterStore\nplain Python dict")]
-```
+The tick loop, Modbus TCP slave, and HTTP control plane share one in-memory
+register bank (`crates/engine`). Scenario playback applies steps onto that
+device; it does not load files from a global `scenarios/` folder. Bundled
+sequences live in the device YAML — see [docs/spec.md](docs/spec.md).
 
-> Because asyncio is cooperative, all reads and writes to `RegisterStore` are atomic —
-> no `asyncio.Lock` needed.
->
-> **ScenarioRunner** (v0.2+) runs as an independent asyncio task inside the container.
-> It replays timed event sequences from YAML scenario files, injecting faults and
-> register overrides at scheduled wall-clock times without blocking the main tick loop.
-> This makes it possible to script full event chains (power outage, thermal runaway,
-> sensor failure) and replay them on demand via `POST /scenarios/{name}/run`.
+> **ScenarioRunner** replays timed event sequences from the loaded contract,
+> injecting faults and register overrides at scheduled wall-clock times without
+> blocking the tick loop. Start them with `POST /scenarios/{id}/run`. They do
+> not run at boot.
 
 ---
 
@@ -230,7 +251,7 @@ flowchart LR
 
     BASE --> GN["gaussian_noise\nbase ± std_dev"]
     BASE --> SIN["sinusoidal\nbase + amplitude·sin(t)"]
-    BASE --> DR["drift\nbase ± rate per tick"]
+    BASE --> DR["drift\nbase ± rate × dt"]
     BASE --> SAW["sawtooth\nramps min→max"]
     BASE --> STEP["step\njumps at elapsed_s"]
     BASE --> CONST["constant\nreturns base"]
@@ -256,139 +277,31 @@ simulation:
   std_dev: 0.3
   drift:
     enabled: true
-    rate: 0.01        # +0.01°C per tick
+    rate: 0.01        # +0.01°C per simulation second
     bounds: [18.0, 35.0]
 ```
 
-> **Time acceleration:** Set `SIMBUS_TICK_INTERVAL=60.0` — each real second simulates one minute
-> of device time. Great for long-period sinusoidal tests.
+> **Tick interval** is the sample period. Wall clock and simulation time are 1:1
+> (`SIMBUS_TICK_INTERVAL=60` ticks once per minute). See [docs/simulation.md](docs/simulation.md).
 
 ---
 
 ## Scenarios
 
-A **scenario** is a timed sequence of events stored in a YAML file. Instead of manually
-calling the REST API at the right moment, you define the entire event sequence once
-and replay it on demand.
+A **scenario** is a timed sequence **bundled in the device YAML**. The process
+loads it at boot and leaves it idle until you start it.
 
-```mermaid
-flowchart LR
-    subgraph scenario["📄 Scenario YAML"]
-        steps["steps:\n- at: 0\n- at: 2\n- at: 5"]
-    end
+Full syntax: [docs/spec.md](docs/spec.md) §7. How to run it:
+[docs/control.md](docs/control.md). Operator notes: [docs/scenarios.md](docs/scenarios.md).
 
-    runner["⚙️ ScenarioRunner\n(async task)"]
-    engine["🔧 SimulationEngine\n(tick loop)"]
-    store[("📦 RegisterStore")]
-    api["🌐 REST API\n/scenarios/{name}/run"]
-
-    scenario --> runner
-    api -->|POST| runner
-    runner -->|set_register\ninject_fault\nset_coil| engine
-    engine --> store
-```
-
-### Built-in example: Heat Wave
-
-```yaml
-# scenarios/heat-wave.yaml (one of 5 built-in examples)
-name: "Heat Wave Event"
-description: >
-  Gradual temperature rise triggering high-temp alarm after 10 seconds.
-steps:
-  - at: 0
-    action: set_register
-    register_name: temperature
-    value: 22.0
-
-  - at: 2
-    action: set_register
-    register_name: temperature
-    value: 25.0
-
-  - at: 5
-    action: set_register
-    register_name: temperature
-    value: 30.0
-
-  - at: 12
-    action: inject_fault
-    fault_type: spike
-    register_name: temperature
-    value: 42.0
-    duration_s: 30
-
-  - at: 15
-    action: set_tick_interval
-    tick_interval: 0.5
-```
-
-> **5 built-in scenarios:** `heat-wave`, `thermal-runaway`, `power-outage`, `fast-alarm-test`, `stuck-sensor`.
-
-### Scenario step types
-
-| Step `action` | What happens | Parameters |
-|---|---|---|
-| `set_register` | Writes a real-world value to a holding or input register | `register_name`, `value`, `register_type` |
-| `inject_fault` | Injects a fault with auto-expiry | `fault_type`, `register_name`, `value`, `duration_s` |
-| `set_coil` | Forces a coil or discrete input to `true`/`false` | `coil`, `value` |
-| `set_tick_interval` | Changes simulation speed mid-scenario | `tick_interval` |
-
-> Steps are sorted by `at` (seconds) before execution. The runner runs in a
-> separate asyncio task — the main tick loop is never blocked.
-
-### Scenario execution timeline
-
-```mermaid
-sequenceDiagram
-    participant Test as 🧪 Test / CI
-    participant API as REST API
-    participant Runner as ScenarioRunner
-    participant Engine as SimulationEngine
-
-    Test->>API: POST /scenarios/heat-wave/run
-    API->>Runner: run(scenario)
-    activate Runner
-    Note over Runner: sort steps by `at`
-
-    Runner->>Engine: set_register temp=22°C
-    Engine-->>Runner: ack
-
-    Runner->>Runner: sleep(2s)
-    Runner->>Engine: set_register temp=25°C
-
-    Runner->>Runner: sleep(3s)
-    Runner->>Engine: set_register temp=30°C
-
-    Runner->>Runner: sleep(7s)
-    Runner->>Engine: inject_fault spike 42°C/30s
-
-    Runner->>Runner: sleep(3s)
-    Runner->>Engine: set_tick_interval 0.5s
-
-    Runner-->>API: state: "completed"
-    deactivate Runner
-    Test->>API: GET /scenarios/active
-    API-->>Test: state: "completed"
-```
-
-### Using scenarios from the API
+Generic T&H ships `heat-wave`, `thermal-runaway`, `fast-alarm-test`, `stuck-sensor`.
+Generic UPS ships `power-outage`.
 
 ```bash
-# List available scenarios
- curl http://localhost:8000/scenarios
-# [{"name": "heat-wave", "description": "..."}]
-
-# Start replay
- curl -X POST http://localhost:8000/scenarios/heat-wave/run
-# {"status": "started", "scenario": "heat-wave", "steps": 7}
-
-# Check progress
- curl http://localhost:8000/scenarios/active
-# {"state": "running", "scenario_name": "heat-wave", "step_index": 3, "total_steps": 7, "elapsed_s": 5.2}
-
-# Cancel early
- curl -X POST http://localhost:8000/scenarios/stop
+curl http://localhost:8000/scenarios
+curl -X POST http://localhost:8000/scenarios/heat-wave/run
+curl http://localhost:8000/scenarios/active
+curl -X POST http://localhost:8000/scenarios/stop
 ```
 
 ---
@@ -402,7 +315,7 @@ Interactive docs at **`http://localhost:8000/docs`** (Swagger UI).
 | Method | Endpoint | Description |
 | --- | --- | --- |
 | `GET` | `/status` | Simulation state, Modbus health, tick interval |
-| `GET` | `/config` | Full register map — names, units, scales, behaviors |
+| `GET` | `/config` | Contract snapshot — map, `spec_version`, bundled scenarios |
 
 ### Registers
 
@@ -413,7 +326,7 @@ Interactive docs at **`http://localhost:8000/docs`** (Swagger UI).
 | `PATCH` | `/registers/input/{address}` | Input — same as above (read-only for Modbus clients, writable via API) |
 | `PATCH` | `/registers/coils/{address}` | Coil — set boolean state |
 | `PATCH` | `/registers/discrete/{address}` | Discrete input — set boolean state |
-| `GET` | `/registers/stream` | **SSE** — one JSON frame per tick, forever |
+| `GET` | `/registers/stream` | **SSE** — JSON snapshots of the bank (sampled from `tick_interval`) |
 
 Numeric PATCH endpoints accept either a **raw** integer or a **real-world** float — the API applies the register's scale automatically:
 
@@ -448,8 +361,8 @@ curl -N http://localhost:8000/registers/stream
 
 | Method | Endpoint | Description |
 | --- | --- | --- |
-| `GET` | `/scenarios` | List available scenario YAML files |
-| `POST` | `/scenarios/{name}/run` | Start replaying a scenario |
+| `GET` | `/scenarios` | List scenarios bundled in the loaded device YAML |
+| `POST` | `/scenarios/{name}/run` | Start replay (`{name}` is the scenario `id`) |
 | `GET` | `/scenarios/active` | Active scenario status (step, elapsed, total) |
 | `POST` | `/scenarios/stop` | Cancel any running scenario |
 
@@ -550,7 +463,57 @@ curl -X POST http://localhost:8000/faults \
 
 ## Device YAML Schema
 
-Define custom devices with `SIMBUS_YAML_PATH` or `--file`.
+The device YAML is the **boot contract**. Language version, fields, validation,
+bindings, and bundled scenarios are defined in **[docs/spec.md](docs/spec.md)**.
+Session mutations (PATCH, faults, run scenario) are **[docs/control.md](docs/control.md)**.
+
+Minimal example (see spec.md for the full language):
+
+```yaml
+name: "My Custom Sensor"
+spec_version: 1
+version: "1.0"
+type: custom_sensor
+
+modbus:
+  default_port: 5030
+  unit_id: 1
+  endianness: big         # big | little | big_swap | little_swap
+
+registers:
+  holding:
+    - address: 0
+      name: pressure
+      description: "Line pressure"
+      unit: "PSI"
+      default: 100.0
+      scale: 10            # raw = real_value × scale  →  100 PSI stored as 1000
+      data_type: uint16    # uint16 | int16 | uint32 | float32
+      simulation:
+        behavior: gaussian_noise
+        std_dev: 0.5
+        drift:
+          enabled: true
+          rate: 0.02
+          bounds: [50.0, 150.0]
+
+  coils:
+    - address: 0
+      name: overpressure_alarm
+      default: false
+      trigger:
+        source_register: pressure
+        condition: gt       # gt | lt | eq | gte | lte
+        threshold: 130.0
+
+alarms:
+  - name: "Overpressure"
+    severity: critical      # info | warning | critical
+    trigger: overpressure_alarm
+```
+
+> Cross-references are validated at load time — if a coil trigger points to a non-existent
+> register, or an alarm references an unknown coil, simbus refuses to start with a clear error.
 
 ```yaml
 name: "My Custom Sensor"
@@ -599,70 +562,71 @@ alarms:
 
 ---
 
+## Validating a device YAML
+
+`simbus check` loads the file through the same parser the runtime uses at boot, then
+prints a summary of what would be configured. It does not start Modbus or the API.
+
+```bash
+cargo run -p runtime -- check devices/community/papouch-th2e.yaml
+```
+
+```text
+OK  devices/community/papouch-th2e.yaml
+
+  name         Papouch TH2E
+  type         papouch_th2e
+  ...
+  counts       holding 0  input …  coils …  discrete …
+```
+
+Exit `0` means the map is valid. Exit `1` prints `FAIL` and the reason. Use this
+before opening a community PR — there is no per-file Rust test.
+
+---
+
 ## Configuration
 
-All settings use the `SIMBUS_` prefix and can be set via environment variables or a `.env` file.
+All settings use the `SIMBUS_` prefix and can be set via environment variables or CLI flags.
 
 | Variable | Default | Description |
 | --- | --- | --- |
-| `SIMBUS_DEVICE_TYPE` | `generic-tnh-sensor` | Built-in device type to simulate |
-| `SIMBUS_YAML_PATH` | — | Path to a custom YAML (overrides `DEVICE_TYPE`) |
+| `SIMBUS_YAML_PATH` | default template | Path to a device YAML (`--file`). Omitted → `devices/builtin/default.yaml` (cwd, else embedded) |
 | `SIMBUS_MODBUS_PORT` | device YAML default | Override Modbus TCP listen port |
+| `SIMBUS_API_HOST` | `0.0.0.0` | REST API bind address |
 | `SIMBUS_API_PORT` | `8000` | REST API listen port |
 | `SIMBUS_TICK_INTERVAL` | `1.0` | Simulation tick in seconds |
-| `SIMBUS_TICK_HEALTH_LOG_INTERVAL` | `60.0` | Periodic simulation loop health log interval in seconds |
 | `SIMBUS_SEED` | — | RNG seed for reproducible output |
 | `SIMBUS_DEVICE_NAME` | — | Override the device name from YAML |
-| `SIMBUS_CORS_ORIGINS` | `["*"]` | Allowed CORS origins for the REST API |
+| `SIMBUS_API_KEY` | — | If set, write endpoints require `x-api-key` or `Bearer` |
+| `SIMBUS_CORS_ORIGINS` | `*` | Comma-separated CORS origins (`*` for development) |
 
 **`.env` example:**
 
 ```env
-SIMBUS_DEVICE_TYPE=generic-ups
+SIMBUS_YAML_PATH=devices/builtin/generic-ups.yaml
 SIMBUS_API_PORT=8001
 SIMBUS_TICK_INTERVAL=1.0
-SIMBUS_TICK_HEALTH_LOG_INTERVAL=60.0
-SIMBUS_CORS_ORIGINS=["http://localhost:5173"]
+SIMBUS_CORS_ORIGINS=http://localhost:5173
+RUST_LOG=info
 ```
 
 ---
 
 ## Logging
 
-simbus prioritizes **functional logs** over generic access logs. The goal is to show
-what changed in the simulation and why, not just that a request happened.
-
+simbus uses [`tracing`](https://docs.rs/tracing) with `RUST_LOG` / `tracing-subscriber` env filters.
 Typical events include:
 
 - `simbus started`
 - `api listening`
 - `modbus server listening`
-- `register changed`
-- `simulation base changed`
-- `fault injected`
-- `fault expired`
-- `faults cleared`
-- `simulation reset`
-- `alarm activated` / `alarm cleared`
-- `simulation tick health`
-
-`simulation tick health` is emitted periodically and includes:
-
-- `tick_interval`
-- `tick_duration_ms`
-- `loop_drift_ms`
-- `sse_subscribers`
-- `active_faults`
-- `uptime_s`
-
-Tune its frequency with:
+- register / fault / scenario control events from the HTTP API
 
 ```bash
-SIMBUS_TICK_HEALTH_LOG_INTERVAL=10
+RUST_LOG=info cargo run -p runtime -- --file devices/builtin/generic-tnh-sensor.yaml
+RUST_LOG=engine=debug,modbus=info cargo run -p runtime -- --file devices/builtin/generic-ups.yaml
 ```
-
-The runtime suppresses default Uvicorn access logs and noisy `pymodbus` protocol
-dumps so container output stays focused on simulation activity and control events.
 
 ---
 
@@ -675,7 +639,7 @@ docker build -t simbus:latest .
 
 docker run -d \
   --cap-add NET_BIND_SERVICE \
-  -e SIMBUS_DEVICE_TYPE=generic-tnh-sensor \
+  -e SIMBUS_YAML_PATH=/app/devices/builtin/generic-tnh-sensor.yaml \
   -p 5020:502 -p 8000:8000 \
   --name simbus-tnh \
   simbus:latest
@@ -691,9 +655,9 @@ docker compose --profile cooling up      # CRAC
 docker compose up tnh-sensor ups crac    # handpick devices
 ```
 
-The image is a two-stage build (`python:3.14-slim` + uv), runs as a non-root user, and includes
-a healthcheck that polls `GET /status` every 15 seconds. Containers start through the
-`simbus` CLI so Docker behavior matches local runs and uses the same logging setup.
+The image is a two-stage build (`rust:1-bookworm` compile + `debian:bookworm-slim` runtime),
+runs as a non-root user, and health-checks `GET /healthz`. The entrypoint is the `simbus`
+binary so Docker behavior matches local runs.
 
 Generic built-in devices listen on Modbus TCP port `502` inside the container and
 on API port `8000`. `docker-compose.yml` maps them to unique host ports (`5020`,
@@ -708,81 +672,66 @@ their YAML by default. For example, the Papouch TH2E keeps its real device port
 ### Setup
 
 ```bash
-git clone https://github.com/your-org/simbus.git
+git clone https://github.com/obsidia-systems/simbus.git
 cd simbus
-uv sync
+cargo build -p runtime
 ```
 
 ### Run tests
 
 ```bash
-uv run pytest                                 # 188 tests, 97% coverage
-uv run pytest -v tests/test_api.py            # single module
-uv run pytest --cov=simbus --cov-report=html  # coverage report
+cargo test --workspace
+cargo test -p spec -p engine -p control -p modbus -p runtime
+cargo fmt --all -- --check
+cargo clippy --workspace --all-targets --locked -- -D warnings
 ```
 
 ### Run locally
 
 ```bash
-fastapi dev simbus/api/main.py                      # default device, hot-reload
-simbus --type generic-ups --port 502 --api-port 8000
-simbus --file ./my-device.yaml --port 512 --api-port 8000
+cargo run -p runtime --                                          # default template
+cargo run -p runtime -- --file devices/builtin/generic-ups.yaml --port 502 --api-port 8000
+cargo run -p runtime -- --file devices/community/papouch-th2e.yaml --port 512 --api-port 8000
+cargo run -p runtime -- check devices/community/papouch-th2e.yaml
 ```
+
+OpenAPI UI: [http://localhost:8000/docs](http://localhost:8000/docs)
 
 ### Project structure
 
 ```text
 simbus/
-├── simbus/
-│   ├── api/
-│   │   ├── main.py            # FastAPI app factory + lifespan
-│   │   ├── schemas.py         # Pydantic request/response models
-│   │   └── routers/
-│   │       ├── status.py      # GET /status, GET /config
-│   │       ├── registers.py   # GET|PATCH /registers, SSE stream
-│   │       ├── simulation.py  # /faults, PATCH|POST /simulation
-│   │       └── scenarios.py   # /scenarios list, run, stop
-│   ├── builtin/               # 7 built-in device YAML files
-│   ├── config/
-│   │   ├── schema.py          # Pydantic v2 models for device YAML
-│   │   └── loader.py          # YAML loader (file path or built-in name)
-│   ├── core/
-│   │   ├── store.py           # In-memory register bank (no locks needed)
-│   │   └── modbus_server.py   # pymodbus 3.12.x async TCP server
-│   ├── scenarios/
-│   │   ├── schema.py          # Pydantic v2 models for scenario YAML
-│   │   ├── loader.py          # Scenario YAML loader
-│   │   └── engine.py          # ScenarioRunner (async replay)
-│   ├── simulation/
-│   │   ├── engine.py          # Async tick loop, behavior dispatch, alarms
-│   │   ├── behaviors.py       # Pure behavior functions
-│   │   └── faults.py          # Fault types and ActiveFault dataclass
-│   ├── logging_config.py      # structlog + stdlib logging configuration
-│   ├── settings.py            # pydantic-settings with SIMBUS_ prefix
-│   └── cli.py                 # Typer CLI — `simbus`
-├── scenarios/                 # Built-in scenario YAML files
-│   ├── heat-wave.yaml         # Gradual temperature rise with spike
-│   ├── thermal-runaway.yaml   # Alarm threshold crossing + recovery
-│   ├── power-outage.yaml      # UPS battery drain sequence
-│   ├── fast-alarm-test.yaml   # CI-friendly 3-second alarm test
-│   └── stuck-sensor.yaml      # Frozen sensor vs rising heat
-└── tests/
-    ├── test_cli.py                # CLI entrypoint (3 tests)
-    ├── test_config.py             # Schema validation + YAML loader
-    ├── test_behaviors.py          # Pure behavior functions
-    ├── test_modbus_server.py      # Modbus integration via TCP client
-    ├── test_scenarios.py          # Scenario engine + API (17 tests)
-    ├── test_simulation_engine.py  # Engine tick, alarms, faults
-    ├── test_store.py              # RegisterStore (3 tests)
-    └── test_api.py                # Full API integration
+├── crates/
+│   ├── spec/        YAML parse + validation
+│   ├── engine/      RegisterBank, tick, faults, scenarios
+│   ├── control/     axum REST / SSE / metrics / healthz
+│   ├── modbus/      tokio-modbus TCP slave
+│   └── runtime/     `simbus` binary — one process, one device
+├── devices/
+│   ├── builtin/     templates (default.yaml + product-shaped maps, bundled scenarios)
+│   └── community/   contributor maps (PR)
+├── scenarios/       Legacy Python catalog only — Rust ignores this folder
+│   ├── heat-wave.yaml
+│   ├── thermal-runaway.yaml
+│   ├── power-outage.yaml
+│   ├── fast-alarm-test.yaml
+│   └── stuck-sensor.yaml
+└── simbus/          Python 0.2.x (legacy, kept until golden parity)
 ```
+
+Each crate documents its tests in its own `README.md`. Run them with `cargo test -p spec` (or `engine`, `control`, `modbus`, `runtime`).
 
 ### Documentation
 
-- [docs/simulation.md](docs/simulation.md) — Full simulation engine reference: every behavior,
-  the drift modifier, alarm triggers, all fault types, and practical recipes.
-- [docs/scenarios.md](docs/scenarios.md) — Scenario engine reference: step types, schema,
-  runner behavior, and practical recipes for alarm pipeline testing.
+- [docs/spec.md](docs/spec.md) — **Normative device language** (the contract).
+- [docs/runtime.md](docs/runtime.md) — Process: boot, CLI/env, tasks, signals, Docker.
+- [docs/control.md](docs/control.md) — Control plane: session HTTP (not the field protocol).
+- [docs/modbus.md](docs/modbus.md) — Field plane: Modbus TCP slave, FC1–FC16, exceptions.
+- [docs/simulation.md](docs/simulation.md) — Engine semantics: behaviors, drift, faults.
+- [docs/scenarios.md](docs/scenarios.md) — Operator notes for bundled scenarios.
+- [docs/debt.md](docs/debt.md) — Deferred work (tick health, time acceleration, pause).
+
+New protocols and new YAML fields start in `docs/spec.md` and `crates/spec`.
 
 ### Contributing
 
@@ -790,8 +739,8 @@ Contributions are welcome. Open an issue first to discuss significant changes.
 
 1. Fork the repository
 2. Create a feature branch (`git checkout -b feature/my-device`)
-3. Add tests for any new behavior
-4. Run `uv run pytest` — all tests must pass
+3. Spec-first: change `docs/spec.md` and `crates/spec` for language changes. Process/CLI: `docs/runtime.md`. For a community YAML, run `simbus check`
+4. Run `cargo test --workspace` and `cargo clippy --workspace --all-targets -- -D warnings`
 5. Open a pull request
 
 ---
@@ -812,10 +761,10 @@ timeline
                          : Pre-defined event sequences (YAML)
                          : Scenario API endpoints
                          : 5 practical recipes included
-    v0.3 — Observability : Prometheus /metrics endpoint
-                          : Health check expansion (ready/live)
-                          : OpenTelemetry tracing
-                          : Community device skill
+    v0.3 — Rust rewrite : 100% Rust runtime (this workspace)
+                         : tokio-modbus + axum
+                         : uint32 / float32 endianness
+                         : /healthz /readyz /metrics
     v0.4 — Connectivity : MQTT publisher mode
                          : SNMP v2c support for network PDUs
                          : Time acceleration controls

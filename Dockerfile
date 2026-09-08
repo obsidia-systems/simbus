@@ -1,82 +1,36 @@
-# ── Stage 1: dependency resolver ────────────────────────────────────────────
-# uv is used only here; the runtime image stays uv-free.
-FROM python:3.14-slim AS builder
-
-ENV PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1 \
-    UV_LINK_MODE=copy
-
-COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
+# ── Stage 1: build the Rust runtime ──────────────────────────────────────────
+FROM rust:1-bookworm AS builder
 
 WORKDIR /app
+COPY Cargo.toml Cargo.lock rust-toolchain.toml rustfmt.toml ./
+COPY crates ./crates
+COPY devices ./devices
 
-# Layer A: resolve & install dependencies (cached unless lock file changes)
-COPY pyproject.toml uv.lock ./
-RUN uv sync --frozen --no-dev --no-install-project
-
-# Layer B: copy source and install the project package itself
-# README.md is required by hatchling to build the package metadata.
-COPY README.md ./
-COPY simbus/ ./simbus/
-RUN uv sync --frozen --no-dev
-
+RUN cargo build --release -p runtime
 
 # ── Stage 2: runtime image ───────────────────────────────────────────────────
-FROM python:3.14-slim AS runtime
+FROM debian:bookworm-slim AS runtime
 
-ENV PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1 \
-    PATH="/app/.venv/bin:$PATH" \
-    # Defaults — override via env vars or docker-compose
-    SIMBUS_DEVICE_TYPE="generic-tnh-sensor" \
-    SIMBUS_API_PORT="8000" \
-    SIMBUS_TICK_INTERVAL="1.0"
+RUN groupadd --system simbus && \
+    useradd --system --gid simbus --no-create-home simbus && \
+    apt-get update && apt-get install -y --no-install-recommends ca-certificates curl && \
+    rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
+COPY --from=builder /app/target/release/simbus /usr/local/bin/simbus
+COPY --from=builder /app/devices /app/devices
 
-# Non-root user — reduces attack surface
-RUN groupadd --system simbus && \
-    useradd --system --gid simbus --no-create-home simbus
-
-# Copy only runtime artifacts from the builder
-COPY --from=builder --chown=simbus:simbus /app/.venv /app/.venv
-COPY --from=builder --chown=simbus:simbus /app/simbus /app/simbus
+ENV SIMBUS_API_PORT="8000" \
+    SIMBUS_TICK_INTERVAL="1.0"
 
 USER simbus
-
-# REST API
-EXPOSE 8000
-# Modbus TCP — clients connect here
-EXPOSE 502
+EXPOSE 8000 502
 
 HEALTHCHECK \
     --interval=15s \
     --timeout=5s \
     --start-period=15s \
     --retries=3 \
-    CMD python -c \
-        "import urllib.request, os; \
-         urllib.request.urlopen( \
-             'http://localhost:' + os.getenv('SIMBUS_API_PORT','8000') + '/status' \
-         )"
+    CMD curl -fsS "http://127.0.0.1:${SIMBUS_API_PORT:-8000}/healthz" || exit 1
 
-# Start through the simbus CLI so logging and runtime behavior stay consistent
-# across local runs, tests, and containers.
-CMD ["/bin/sh", "-c", "\
-PORT_ARG=\"\"; \
-if [ -n \"${SIMBUS_MODBUS_PORT:-}\" ]; then PORT_ARG=\"--port ${SIMBUS_MODBUS_PORT}\"; fi; \
-if [ -n \"${SIMBUS_YAML_PATH:-}\" ]; then \
-  exec simbus \
-    --file \"${SIMBUS_YAML_PATH}\" \
-    --api-port \"${SIMBUS_API_PORT:-8000}\" \
-    --host \"${SIMBUS_API_HOST:-0.0.0.0}\" \
-    --tick \"${SIMBUS_TICK_INTERVAL:-1.0}\" \
-    ${PORT_ARG}; \
-else \
-  exec simbus \
-    --type \"${SIMBUS_DEVICE_TYPE:-generic-tnh-sensor}\" \
-    --api-port \"${SIMBUS_API_PORT:-8000}\" \
-    --host \"${SIMBUS_API_HOST:-0.0.0.0}\" \
-    --tick \"${SIMBUS_TICK_INTERVAL:-1.0}\" \
-    ${PORT_ARG}; \
-fi"]
+ENTRYPOINT ["/usr/local/bin/simbus"]

@@ -9,6 +9,49 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Added
 
+- `simbus check <file>` — validate a device YAML and print a configuration
+  summary without starting Modbus or the API. CI runs it on every file under
+  `devices/`.
+- `devices/builtin/default.yaml` — official example template used when
+  `simbus` is started with no `--file` / `SIMBUS_YAML_PATH` (cwd file, else
+  the copy embedded in the binary).
+- `devices/community/` for contributor maps (PR). Official templates stay in
+  `devices/builtin/`.
+- Device YAML is the boot contract: `spec_version`, bundled `scenarios:`,
+  and protocol bindings (unimplemented protocols are valid syntax; boot refuses
+  them). Normative language: `docs/spec.md`. Session API: `docs/control.md`.
+  Process: `docs/runtime.md` (SIGINT/SIGTERM, exit if a server task dies).
+- `docs/debt.md` — deferred work after closing spec, runtime, engine, control,
+  and modbus (tick health, time acceleration, pause).
+
+### Changed
+
+- Boot is file-only: `--file` / `SIMBUS_YAML_PATH`, else the default template.
+  There is no `--type` / `SIMBUS_DEVICE_TYPE` / `--devices-dir`. Official maps
+  are templates you point `--file` at. The YAML field `type:` remains identity
+  inside the document. The default template is also embedded so `simbus` with
+  no args works without a checkout.
+- Papouch TH2E lives at `devices/community/papouch-th2e.yaml`.
+- Bundled scenarios live in the device YAML. The Rust runtime no longer reads
+  `SIMBUS_SCENARIO_DIR` / a global `scenarios/` catalog.
+- Engine tick contract (`docs/simulation.md`): drift is `rate × dt` (per
+  simulation second, not per tick). `uint16` encode clamps instead of wrapping.
+  Trigger `eq` matches within half a raw LSB. Freeze latches the cell at inject.
+  `POST /simulation/reset` restores boot `RegState` and the RNG stream (same seeded trace). Seed
+  mix includes `identity`. Wall clock and simulation time stay 1:1; there is
+  no time acceleration in this version.
+- Control plane (`docs/control.md`, crate `control` not `api`): session HTTP
+  vs Modbus field plane. `GET /registers/stream` follows engine ticks and
+  session writes. SSE is not covered by the 30 s request timeout. Faults
+  validate register/coil names (404) and spike `value` (422). OpenAPI lists
+  the full session route set.
+- Modbus field plane (`docs/modbus.md`): FC1–FC4/5/6/15/16. Reads may return
+  zeros in map holes; writes are all-or-nothing (`IllegalDataAddress`). FC16
+  walks cell starts so adjacent `uint16`s and `float32` pairs both update
+  `state.base`. TCP unit id must match YAML (`Ok(None)` otherwise).
+
+### Added
+
 - Functional logging for simulation/runtime events:
   - `simbus started`
   - `api listening`

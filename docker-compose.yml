@@ -39,7 +39,7 @@ services:
     <<: *simbus-defaults
     container_name: simbus-tnh-sensor
     environment:
-      SIMBUS_DEVICE_TYPE: generic-tnh-sensor
+      SIMBUS_YAML_PATH: /app/devices/builtin/generic-tnh-sensor.yaml
       SIMBUS_TICK_INTERVAL: "1.0"
     ports:
       - "5020:502"    # Modbus TCP
@@ -50,7 +50,7 @@ services:
     <<: *simbus-defaults
     container_name: simbus-leak-sensor
     environment:
-      SIMBUS_DEVICE_TYPE: generic-leak-sensor
+      SIMBUS_YAML_PATH: /app/devices/builtin/generic-leak-sensor.yaml
       SIMBUS_TICK_INTERVAL: "1.0"
     ports:
       - "5025:502"
@@ -61,7 +61,7 @@ services:
     <<: *simbus-defaults
     container_name: simbus-door-contact
     environment:
-      SIMBUS_DEVICE_TYPE: generic-door-contact
+      SIMBUS_YAML_PATH: /app/devices/builtin/generic-door-contact.yaml
       SIMBUS_TICK_INTERVAL: "1.0"
     ports:
       - "5026:502"
@@ -74,7 +74,7 @@ services:
     <<: *simbus-defaults
     container_name: simbus-crac
     environment:
-      SIMBUS_DEVICE_TYPE: generic-crac
+      SIMBUS_YAML_PATH: /app/devices/builtin/generic-crac.yaml
       SIMBUS_TICK_INTERVAL: "1.0"
     ports:
       - "5023:502"
@@ -87,7 +87,7 @@ services:
     <<: *simbus-defaults
     container_name: simbus-ups
     environment:
-      SIMBUS_DEVICE_TYPE: generic-ups
+      SIMBUS_YAML_PATH: /app/devices/builtin/generic-ups.yaml
       SIMBUS_TICK_INTERVAL: "1.0"
     ports:
       - "5021:502"
@@ -98,7 +98,7 @@ services:
     <<: *simbus-defaults
     container_name: simbus-pdu
     environment:
-      SIMBUS_DEVICE_TYPE: generic-pdu
+      SIMBUS_YAML_PATH: /app/devices/builtin/generic-pdu.yaml
       SIMBUS_TICK_INTERVAL: "1.0"
     ports:
       - "5022:502"
@@ -109,7 +109,7 @@ services:
     <<: *simbus-defaults
     container_name: simbus-power-meter
     environment:
-      SIMBUS_DEVICE_TYPE: generic-power-meter
+      SIMBUS_YAML_PATH: /app/devices/builtin/generic-power-meter.yaml
       SIMBUS_TICK_INTERVAL: "1.0"
     ports:
       - "5024:502"
@@ -121,9 +121,9 @@ services:
     <<: *simbus-defaults
     container_name: simbus-papouch-th2e-01
     volumes:
-    - ./devices:/app/devices:ro   # monta en tiempo de ejecución, sin rebuild
+    - ./devices:/app/devices:ro   # mount at runtime, no rebuild needed
     environment:
-      SIMBUS_YAML_PATH: "/app/devices/papouch-th2e.yaml"
+      SIMBUS_YAML_PATH: /app/devices/community/papouch-th2e.yaml
     ports:
       - "5512:512"
       - "8100:8000"
@@ -133,9 +133,9 @@ services:
     <<: *simbus-defaults
     container_name: simbus-papouch-th2e-02
     volumes:
-    - ./devices:/app/devices:ro   # monta en tiempo de ejecución, sin rebuild
+    - ./devices:/app/devices:ro   # mount at runtime, no rebuild needed
     environment:
-      SIMBUS_YAML_PATH: "/app/devices/papouch-th2e.yaml"
+      SIMBUS_YAML_PATH: /app/devices/community/papouch-th2e.yaml
     ports:
       - "5513:512"
       - "8101:8000"
@@ -145,9 +145,9 @@ services:
     <<: *simbus-defaults
     container_name: simbus-papouch-th2e-03
     volumes:
-    - ./devices:/app/devices:ro   # monta en tiempo de ejecución, sin rebuild
+    - ./devices:/app/devices:ro   # mount at runtime, no rebuild needed
     environment:
-      SIMBUS_YAML_PATH: "/app/devices/papouch-th2e.yaml"
+      SIMBUS_YAML_PATH: /app/devices/community/papouch-th2e.yaml
     ports:
       - "5514:512"
       - "8102:8000"
@@ -157,9 +157,9 @@ services:
     <<: *simbus-defaults
     container_name: simbus-papouch-th2e-04
     volumes:
-    - ./devices:/app/devices:ro   # monta en tiempo de ejecución, sin rebuild
+    - ./devices:/app/devices:ro   # mount at runtime, no rebuild needed
     environment:
-      SIMBUS_YAML_PATH: "/app/devices/papouch-th2e.yaml"
+      SIMBUS_YAML_PATH: /app/devices/community/papouch-th2e.yaml
     ports:
       - "5515:512"
       - "8103:8000"

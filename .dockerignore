@@ -31,5 +31,4 @@ htmlcov/
 
 # Docs and examples
 docs/
-devices/
 example.py

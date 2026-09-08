@@ -7,10 +7,46 @@ on:
     branches: [main, develop]
 
 jobs:
-  lint-and-test:
-    name: Lint & Test
+  rust:
+    name: Rust
     runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
 
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Cache
+        uses: Swatinem/rust-cache@v2
+
+      - name: Format
+        run: cargo fmt --all -- --check
+
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
+
+      - name: Test
+        run: cargo test --workspace --locked
+
+      - name: Validate device YAML
+        run: |
+          set -euo pipefail
+          cargo build -p runtime --locked --quiet
+          fail=0
+          while IFS= read -r -d '' f; do
+            echo "==> $f"
+            if ! ./target/debug/simbus check "$f"; then
+              fail=1
+            fi
+          done < <(find devices -name '*.yaml' -print0 | sort -z)
+          exit "$fail"
+
+  python-legacy:
+    name: Python (legacy)
+    runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
