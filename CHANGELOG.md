@@ -9,6 +9,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Added
 
+- Rust rewrite of the 0.2.x Python runtime: workspace crates `spec`,
+  `engine`, `control`, `modbus`, and binary package `simbus`
+  (`crates/runtime`). MSRV 1.85, edition 2024 (tokio, axum, tokio-modbus).
+  The Docker image builds that binary (`cargo build --release -p simbus`).
 - `simbus check <file>` — validate a device YAML and print a configuration
   summary without starting Modbus or the API. CI runs it on every file under
   `devices/`.
