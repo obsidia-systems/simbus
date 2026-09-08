@@ -17,15 +17,13 @@ and operator training — **no hardware required**.
 
 ```mermaid
 flowchart LR
-    subgraph fleet["simbus fleet — one container per device"]
-        device["🔌 Modbus :5020+ | 🌐 API :8000+"]
+    subgraph fleet [simbus fleet]
+        device[One process: Modbus plus HTTP]
     end
-
-    scada["Ignition / SCADA<br/>Modbus TCP client"]
-    gui["Your GUI / Tests<br/>REST API client"]
-
-    scada -->|FC1/FC3 reads| device
-    gui -->|POST /faults<br/>GET /scenarios| device
+    scada[SCADA Modbus TCP client]
+    gui[GUI or tests HTTP client]
+    scada -->|FC1 / FC3| device
+    gui -->|REST / SSE| device
 ```
 
 ---
@@ -37,7 +35,7 @@ static, hard to script, or impossible to containerize. **simbus** was built to f
 
 | Without simbus | With simbus |
 | --- | --- |
-| Buy a UPS, PDU, and sensors just to test a tag config | `docker compose up ups pdu tnh-sensor` |
+| Buy a UPS, PDU, and sensors just to test a tag config | `docker compose up tnh-sensor ups pdu` |
 | Static registers that never change | Gaussian noise, drift, sinusoidal cycles, sawtooth |
 | Can't test alarm pipelines without breaking real hardware | Inject spikes, freezes, dropouts via REST — on demand |
 | Rebuilding state after every test run | `POST /simulation/reset` rewinds everything instantly |
@@ -63,6 +61,7 @@ static, hard to script, or impossible to containerize. **simbus** was built to f
 - [Logging](#logging)
 - [Docker](#docker)
 - [Development](#development)
+- [Documentation](#documentation)
 - [Roadmap](#roadmap)
 - [License](#license)
 
@@ -73,10 +72,10 @@ static, hard to script, or impossible to containerize. **simbus** was built to f
 ### With Docker (recommended)
 
 ```bash
-# Start a single T&H sensor
+# Start a single T&H sensor (naming a service ignores its profile)
 docker compose up tnh-sensor
 
-# Or the full 7-device lab
+# Full compose lab: 7 builtin templates + 4 Papouch TH2E instances
 docker compose --profile all up
 ```
 
@@ -96,7 +95,7 @@ curl http://localhost:8000/status
 }
 ```
 
-### From source (Rust)
+### From source
 
 ```bash
 git clone https://github.com/obsidia-systems/simbus.git
@@ -104,6 +103,7 @@ cd simbus
 cargo run -p runtime -- --file devices/builtin/generic-tnh-sensor.yaml --port 502 --api-port 8000
 ```
 
+> [!NOTE]
 > **Requirements:** Rust 1.85+ (edition 2024), Docker (optional)
 
 ---
@@ -122,20 +122,28 @@ simbus --file devices/builtin/generic-ups.yaml
 simbus --file devices/community/papouch-th2e.yaml
 ```
 
-Seven product-shaped templates ship ready to use. Each has a realistic register map, trigger-based alarms,
-and physics-appropriate simulation.
+Seven product-shaped templates ship ready to use, plus `devices/builtin/default.yaml`
+(the zero-arg example device, not a product). Each product template has a realistic
+register map, trigger-based alarms, and physics-appropriate simulation.
 
-| Device | YAML | Device Modbus | Device API | Example host map | Holding | Coils |
-| --- | --- | --- | --- | --- | --- | --- |
-| 🌡️ T&H Sensor | `devices/builtin/generic-tnh-sensor.yaml` | 502 | 8000 | `5020:502`, `8000:8000` | 2 | 2 |
-| 🔋 UPS | `devices/builtin/generic-ups.yaml` | 502 | 8000 | `5021:502`, `8001:8000` | 6 | 4 |
-| ⚡ PDU | `devices/builtin/generic-pdu.yaml` | 502 | 8000 | `5022:502`, `8002:8000` | 6 | 3 |
-| ❄️ CRAC Unit | `devices/builtin/generic-crac.yaml` | 502 | 8000 | `5023:502`, `8003:8000` | 6 | 4 + 1 discrete |
-| 📊 Power Meter | `devices/builtin/generic-power-meter.yaml` | 502 | 8000 | `5024:502`, `8004:8000` | 12 | 3 |
-| 💧 Leak Sensor | `devices/builtin/generic-leak-sensor.yaml` | 502 | 8000 | `5025:502`, `8005:8000` | 4 | 3 + 1 discrete |
-| 🚪 Door Contact | `devices/builtin/generic-door-contact.yaml` | 502 | 8000 | `5026:502`, `8006:8000` | 3 | 4 + 2 discrete |
+Host ports below are the `docker-compose.yml` mappings. Inside the container every
+generic template listens on Modbus `502` and HTTP `8000`. Compose is not required
+for local `cargo run`.
 
-Inspect any running device's full register map:
+| Device | YAML | Example host map | Holding | Coils |
+| --- | --- | --- | --- | --- |
+| 🌡️ T&H Sensor | `devices/builtin/generic-tnh-sensor.yaml` | `5020:502`, `8000:8000` | 2 | 2 |
+| 🔋 UPS | `devices/builtin/generic-ups.yaml` | `5021:502`, `8001:8000` | 6 | 4 |
+| ⚡ PDU | `devices/builtin/generic-pdu.yaml` | `5022:502`, `8002:8000` | 6 | 3 |
+| ❄️ CRAC Unit | `devices/builtin/generic-crac.yaml` | `5023:502`, `8003:8000` | 6 | 4 + 1 discrete |
+| 📊 Power Meter | `devices/builtin/generic-power-meter.yaml` | `5024:502`, `8004:8000` | 12 | 3 |
+| 💧 Leak Sensor | `devices/builtin/generic-leak-sensor.yaml` | `5025:502`, `8005:8000` | 4 | 3 + 1 discrete |
+| 🚪 Door Contact | `devices/builtin/generic-door-contact.yaml` | `5026:502`, `8006:8000` | 3 | 4 + 2 discrete |
+
+`default.yaml` is not a Compose service. Papouch TH2E is community (`512` inside the
+container; host `5512–5515` / `8100–8103` with `--profile custom` or `--profile all`).
+
+Inspect any running device's full register map (`GET /config`). Excerpt:
 
 ```bash
 curl http://localhost:8000/config
@@ -181,61 +189,38 @@ cargo run -p runtime -- --file ./devices/community/papouch-th2e.yaml --port 512 
 
 ## Architecture
 
+Normative picture: [docs/architecture.md](docs/architecture.md). Index:
+[docs/README.md](docs/README.md).
+
 ```mermaid
 flowchart TB
-    subgraph container["🐳 Container — one per device"]
-        direction TB
-        engine["⚙️ engine\ntick loop"]
-        store[("📦 RegisterBank\nin-memory")]
-        modbus["🔌 Modbus TCP\ntokio-modbus"]
-        api["🌐 axum\nREST + SSE"]
-        scenario["📜 ScenarioRunner\ntimed event replay"]
-
-        engine -- "writes every tick" --> store
-        store -- "serves registers" --> modbus
-        api -- "reads / writes" --> store
-        api -- "controls" --> engine
-        api -- "runs / stops" --> scenario
-        scenario -- "injects events" --> engine
-        scenario -- "writes" --> store
+    subgraph container [One container, one device]
+        engine[engine tick loop]
+        store[(RegisterBank)]
+        modbusNode[Modbus TCP]
+        api[HTTP control]
+        scenario[ScenarioRunner]
+        engine -->|writes every tick| store
+        store --> modbusNode
+        api --> store
+        api --> engine
+        api --> scenario
+        scenario --> engine
+        scenario --> store
     end
-
-    scada["🖥️ Ignition / SCADA\nModbus client"]
-    gui["💻 GUI / Tests\nHTTP client"]
-
-    scada -- "FC3/FC1 reads" --> modbus
-    gui -- "REST API\nSSE stream" --> api
+    scada[SCADA]
+    gui[GUI / tests]
+    scada -->|FC1 to FC16| modbusNode
+    gui -->|REST and SSE| api
 ```
 
-### Data flow on each tick
+Tick formulas live in [docs/simulation.md](docs/simulation.md). The tick loop,
+Modbus slave, and HTTP control plane share one `RegisterBank`. Scenarios are
+bundled in the device YAML.
 
-```mermaid
-flowchart LR
-    T([⏱️ tick]) --> A[iterate registers]
-    A --> B{has behavior?}
-    B -- yes --> C[compute new value\nfrom state.base]
-    B -- no --> G
-    C --> D{active fault?}
-    D -- spike/freeze/\ndropout --> E[override value]
-    D -- none --> F[use computed value]
-    E --> G[write to RegisterStore]
-    F --> G
-    G --> H[evaluate alarm triggers]
-    H --> I[update coil states]
-    I --> J[push SSE snapshot]
-```
-
-### Shared bank, no second store
-
-The tick loop, Modbus TCP slave, and HTTP control plane share one in-memory
-register bank (`crates/engine`). Scenario playback applies steps onto that
-device; it does not load files from a global `scenarios/` folder. Bundled
-sequences live in the device YAML — see [docs/spec.md](docs/spec.md).
-
-> **ScenarioRunner** replays timed event sequences from the loaded contract,
-> injecting faults and register overrides at scheduled wall-clock times without
-> blocking the tick loop. Start them with `POST /scenarios/{id}/run`. They do
-> not run at boot.
+> [!NOTE]
+> ScenarioRunner stays idle until `POST /scenarios/{id}/run`. It does not run
+> at boot.
 
 ---
 
@@ -281,7 +266,8 @@ simulation:
     bounds: [18.0, 35.0]
 ```
 
-> **Tick interval** is the sample period. Wall clock and simulation time are 1:1
+> [!NOTE]
+> Tick interval is the sample period. Wall clock and simulation time are 1:1
 > (`SIMBUS_TICK_INTERVAL=60` ticks once per minute). See [docs/simulation.md](docs/simulation.md).
 
 ---
@@ -295,7 +281,7 @@ Full syntax: [docs/spec.md](docs/spec.md) §7. How to run it:
 [docs/control.md](docs/control.md). Operator notes: [docs/scenarios.md](docs/scenarios.md).
 
 Generic T&H ships `heat-wave`, `thermal-runaway`, `fast-alarm-test`, `stuck-sensor`.
-Generic UPS ships `power-outage`.
+Generic UPS ships `power-outage`. The default template ships `demo-spike`.
 
 ```bash
 curl http://localhost:8000/scenarios
@@ -308,14 +294,19 @@ curl -X POST http://localhost:8000/scenarios/stop
 
 ## REST API Reference
 
-Interactive docs at **`http://localhost:8000/docs`** (Swagger UI).
+Normative route list: [docs/control.md](docs/control.md). Interactive docs at
+**`http://localhost:8000/docs`** (Swagger UI).
 
 ### Status and Discovery
 
 | Method | Endpoint | Description |
 | --- | --- | --- |
-| `GET` | `/status` | Simulation state, Modbus health, tick interval |
+| `GET` | `/status` | Name, type, listen Modbus port, tick, `running`/`stopped`, Modbus `listening`/`stopped` |
 | `GET` | `/config` | Contract snapshot — map, `spec_version`, bundled scenarios |
+| `GET` | `/healthz` | Liveness (200 if the HTTP task is up) |
+| `GET` | `/readyz` | 200 when Modbus is listening and `is_running`; else 503 |
+| `GET` | `/metrics` | Prometheus text |
+| `GET` | `/docs` | Swagger UI (`/api-docs/openapi.json` for the spec) |
 
 ### Registers
 
@@ -326,7 +317,7 @@ Interactive docs at **`http://localhost:8000/docs`** (Swagger UI).
 | `PATCH` | `/registers/input/{address}` | Input — same as above (read-only for Modbus clients, writable via API) |
 | `PATCH` | `/registers/coils/{address}` | Coil — set boolean state |
 | `PATCH` | `/registers/discrete/{address}` | Discrete input — set boolean state |
-| `GET` | `/registers/stream` | **SSE** — JSON snapshots of the bank (sampled from `tick_interval`) |
+| `GET` | `/registers/stream` | **SSE** — current snapshot on subscribe, then each tick and each session write |
 
 Numeric PATCH endpoints accept either a **raw** integer or a **real-world** float — the API applies the register's scale automatically:
 
@@ -356,6 +347,9 @@ curl -N http://localhost:8000/registers/stream
 | --- | --- | --- |
 | `PATCH` | `/simulation` | Update tick interval live — takes effect next tick |
 | `POST` | `/simulation/reset` | Reset all registers to YAML defaults, clear all faults |
+| `GET` | `/faults` | Active faults (TTL remaining is simulation seconds) |
+| `POST` | `/faults` | Inject a fault |
+| `DELETE` | `/faults` | Clear all faults |
 
 ### Scenarios
 
@@ -375,28 +369,26 @@ edge cases, and failure scenarios without touching real hardware.
 
 ```mermaid
 sequenceDiagram
-    participant Test as 🧪 Test / CI
-    participant API as REST API
-    participant Engine as ⚙️ Engine
-    participant SCADA as 🖥️ Ignition
-
-    Test->>API: POST /faults {"type":"spike","value":35.0,"duration_s":60}
-    API->>Engine: inject_fault(...)
-    Note over Engine: next tick: temperature forced to 35.0°C
-    Engine-->>SCADA: Modbus read returns 350 (raw)
-    SCADA-->>SCADA: High Temp alarm fires 🚨
-    Note over Engine: 60 seconds later: fault expires automatically
-    Engine-->>SCADA: temperature returns to normal simulation
-    Test->>API: GET /faults → []
+    autonumber
+    actor Test as Test / CI
+    participant API as HTTP control
+    participant Engine as engine
+    participant SCADA as SCADA
+    Test->>API: POST /faults spike
+    API->>Engine: inject_fault
+    Note over Engine: next tick forces the register
+    Engine-->>SCADA: FC3 returns spiked raw
+    Note over Engine: TTL expires
+    Engine-->>SCADA: normal simulation resumes
 ```
 
 | Fault type | What happens |
 | --- | --- |
-| `spike` | Forces a register to an extreme value for the duration |
-| `freeze` | Holds a register at its current value — stuck sensor |
-| `dropout` | Sets a register to `0` — loss of signal |
-| `noise_amplify` | Multiplies noise `std_dev` by `value` |
-| `alarm` | Forces a register to a value to trigger a specific alarm |
+| `spike` | Forces a holding or input register to `value` (real units) for the duration |
+| `freeze` | Latches the cell’s real value at inject — stuck sensor |
+| `dropout` | Forces `0`. Named register, or every holding and input cell when `register_name` is omitted |
+| `noise_amplify` | Extra noise with `std_dev × value` (default factor `10`) |
+| `alarm` | Forces the **coil** of that name to `true` (skips the trigger). Does not change registers |
 
 ```bash
 # Spike temperature to trigger high-temp alarm for 60 seconds
@@ -618,10 +610,14 @@ RUST_LOG=info
 simbus uses [`tracing`](https://docs.rs/tracing) with `RUST_LOG` / `tracing-subscriber` env filters.
 Typical events include:
 
-- `simbus started`
-- `api listening`
-- `modbus server listening`
-- register / fault / scenario control events from the HTTP API
+- `loading device yaml` / `loading default template` / `loading embedded default template`
+- `simbus started` / `simbus stopping`
+- `api listening` / `modbus server listening`
+- `fault injected` / `fault expired` / `faults cleared` / `simulation reset`
+- `simulation base changed` / `alarm activated` / `alarm cleared` / `discrete changed`
+
+There is no periodic `simulation tick health` log in this version
+([docs/debt.md](docs/debt.md)).
 
 ```bash
 RUST_LOG=info cargo run -p runtime -- --file devices/builtin/generic-tnh-sensor.yaml
@@ -648,12 +644,17 @@ docker run -d \
 ### Full lab with docker compose
 
 ```bash
-docker compose --profile all up          # all 7 devices
+docker compose --profile all up          # 7 builtin + 4 Papouch (11 containers)
 docker compose --profile power up        # UPS + PDU + Power Meter
-docker compose --profile env up          # T&H Sensor + Leak + Door Contact
+docker compose --profile env up          # T&H + Leak + Door Contact
 docker compose --profile cooling up      # CRAC
-docker compose up tnh-sensor ups crac    # handpick devices
+docker compose --profile custom up       # Papouch TH2E × 4
+docker compose up tnh-sensor ups crac    # handpick by service name
 ```
+
+Every Compose service has a profile. `docker compose up` with no service names
+and no `--profile` starts **nothing**. Naming a service (`up tnh-sensor`) starts
+it even without enabling its profile.
 
 The image is a two-stage build (`rust:1-bookworm` compile + `debian:bookworm-slim` runtime),
 runs as a non-root user, and health-checks `GET /healthz`. The entrypoint is the `simbus`
@@ -680,8 +681,8 @@ cargo build -p runtime
 ### Run tests
 
 ```bash
-cargo test --workspace
-cargo test -p spec -p engine -p control -p modbus -p runtime
+cargo test --workspace --locked
+cargo test -p spec -p engine -p control -p modbus -p runtime --locked
 cargo fmt --all -- --check
 cargo clippy --workspace --all-targets --locked -- -D warnings
 ```
@@ -701,35 +702,46 @@ OpenAPI UI: [http://localhost:8000/docs](http://localhost:8000/docs)
 
 ```text
 simbus/
+├── Cargo.toml              workspace: spec, engine, control, modbus, runtime
+├── Cargo.lock
 ├── crates/
-│   ├── spec/        YAML parse + validation
-│   ├── engine/      RegisterBank, tick, faults, scenarios
-│   ├── control/     axum REST / SSE / metrics / healthz
-│   ├── modbus/      tokio-modbus TCP slave
-│   └── runtime/     `simbus` binary — one process, one device
+│   ├── spec/               YAML parse + validation + `simbus check` report
+│   ├── engine/             RegisterBank, tick, faults, scenario steps
+│   ├── control/            axum REST / SSE / metrics / healthz
+│   ├── modbus/             tokio-modbus TCP slave
+│   └── runtime/            `simbus` binary — one process, one device
 ├── devices/
-│   ├── builtin/     templates (default.yaml + product-shaped maps, bundled scenarios)
-│   └── community/   contributor maps (PR)
-├── scenarios/       Legacy Python catalog only — Rust ignores this folder
-│   ├── heat-wave.yaml
-│   ├── thermal-runaway.yaml
-│   ├── power-outage.yaml
-│   ├── fast-alarm-test.yaml
-│   └── stuck-sensor.yaml
-└── simbus/          Python 0.2.x (legacy, kept until golden parity)
+│   ├── builtin/            default.yaml + 7 product-shaped templates
+│   └── community/          contributor maps (papouch-th2e.yaml)
+├── docs/                   contracts (spec, runtime, modbus, control, …)
+├── .github/workflows/      CI + GHCR image publish
+├── Dockerfile
+├── docker-compose.yml      7 builtin services + 4 Papouch (profiles)
+├── rust-toolchain.toml
+├── rustfmt.toml
+├── deny.toml
+├── LICENSE
+├── index.html              marketing landing (not a contract)
+└── README.md
 ```
 
-Each crate documents its tests in its own `README.md`. Run them with `cargo test -p spec` (or `engine`, `control`, `modbus`, `runtime`).
+There is no `scenarios/` folder and no Python tree. Bundled scenarios live in
+each device YAML (`scenarios:`). Each crate documents its tests in its own
+`README.md`. Run them with `cargo test -p spec` (or `engine`, `control`,
+`modbus`, `runtime`).
 
 ### Documentation
 
-- [docs/spec.md](docs/spec.md) — **Normative device language** (the contract).
-- [docs/runtime.md](docs/runtime.md) — Process: boot, CLI/env, tasks, signals, Docker.
-- [docs/control.md](docs/control.md) — Control plane: session HTTP (not the field protocol).
-- [docs/modbus.md](docs/modbus.md) — Field plane: Modbus TCP slave, FC1–FC16, exceptions.
-- [docs/simulation.md](docs/simulation.md) — Engine semantics: behaviors, drift, faults.
-- [docs/scenarios.md](docs/scenarios.md) — Operator notes for bundled scenarios.
-- [docs/debt.md](docs/debt.md) — Deferred work (tick health, time acceleration, pause).
+Map and Diátaxis roles: **[docs/README.md](docs/README.md)**.
+
+- [docs/architecture.md](docs/architecture.md) — How the process is shaped (diagrams).
+- [docs/spec.md](docs/spec.md) — Device YAML language (boot contract).
+- [docs/runtime.md](docs/runtime.md) — Binary, boot, CLI/env, signals, Docker.
+- [docs/modbus.md](docs/modbus.md) — Field plane: Modbus TCP (V1.1b3 / V1.0b).
+- [docs/control.md](docs/control.md) — Session HTTP (not the field protocol).
+- [docs/simulation.md](docs/simulation.md) — Tick, `state.base`, behaviors, faults.
+- [docs/scenarios.md](docs/scenarios.md) — How to run bundled scenarios.
+- [docs/debt.md](docs/debt.md) — Specified as not this version.
 
 New protocols and new YAML fields start in `docs/spec.md` and `crates/spec`.
 
@@ -739,8 +751,8 @@ Contributions are welcome. Open an issue first to discuss significant changes.
 
 1. Fork the repository
 2. Create a feature branch (`git checkout -b feature/my-device`)
-3. Spec-first: change `docs/spec.md` and `crates/spec` for language changes. Process/CLI: `docs/runtime.md`. For a community YAML, run `simbus check`
-4. Run `cargo test --workspace` and `cargo clippy --workspace --all-targets -- -D warnings`
+3. Spec-first: change `docs/spec.md` and `crates/spec` for language changes. Architecture/process: `docs/architecture.md` / `docs/runtime.md`. For a community YAML, run `simbus check`
+4. Run `cargo test --workspace --locked` and `cargo clippy --workspace --all-targets --locked -- -D warnings`
 5. Open a pull request
 
 ---
@@ -750,30 +762,17 @@ Contributions are welcome. Open an issue first to discuss significant changes.
 ```mermaid
 timeline
     title simbus Roadmap
-    v0.1 — Core ✅ : Modbus TCP server
-                    : 7 built-in devices
-                    : Simulation engine (6 behaviors)
-                    : REST API + SSE stream
-                    : Fault injection
-                    : Docker multi-stage
-                    : 188 passing tests, 97% coverage
-    v0.2 — Scenarios ✅ : Scenario playback system
-                         : Pre-defined event sequences (YAML)
-                         : Scenario API endpoints
-                         : 5 practical recipes included
-    v0.3 — Rust rewrite : 100% Rust runtime (this workspace)
-                         : tokio-modbus + axum
-                         : uint32 / float32 endianness
-                         : /healthz /readyz /metrics
-    v0.4 — Connectivity : MQTT publisher mode
-                         : SNMP v2c support for network PDUs
-                         : Time acceleration controls
-                         : Snapshot / restore full device state
-    v1.0 — Protocols : BACnet/IP support
-                     : DNP3 protocol support
-                     : OPC-UA server mode
-                     : Protocol abstraction layer
+    v0.1 — Core : Modbus TCP, 7 templates, 6 behaviors, REST plus SSE, faults, Docker
+    v0.2 — Scenarios : Playback API, recipes later moved into device YAML
+    v0.3 — Rust workspace : this tree — tokio-modbus, axum, file-only boot, healthz/readyz/metrics
+    Specified not served : MQTT Sparkplug, SNMP v2c, BACnet/IP, OPC UA, Modbus RTU/TLS
+    Ops debt : time acceleration, pause, tick health log, graceful drain
 ```
+
+Unimplemented protocol **syntax** is already valid YAML (`simbus check` notes it;
+boot refuses). Serving those protocols is [docs/spec.md](docs/spec.md) §4.
+Deferred process work is [docs/debt.md](docs/debt.md). There is no DNP3 binding
+in language version 1.
 
 ---
 

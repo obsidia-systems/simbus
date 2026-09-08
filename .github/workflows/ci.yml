@@ -43,31 +43,3 @@ jobs:
             fi
           done < <(find devices -name '*.yaml' -print0 | sort -z)
           exit "$fail"
-
-  python-legacy:
-    name: Python (legacy)
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Set up uv
-        uses: astral-sh/setup-uv@v5
-        with:
-          version: "latest"
-          python-version: "3.14"
-
-      - name: Install dependencies
-        run: uv sync --frozen
-
-      - name: Run ruff check
-        run: uv run ruff check simbus tests
-
-      - name: Run ruff format check
-        run: uv run ruff format --check simbus tests
-
-      - name: Run mypy
-        run: uv run mypy simbus
-
-      - name: Run tests with coverage
-        run: uv run pytest -v --cov=simbus --cov-report=term-missing --cov-fail-under=95

@@ -45,10 +45,33 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   session writes. SSE is not covered by the 30 s request timeout. Faults
   validate register/coil names (404) and spike `value` (422). OpenAPI lists
   the full session route set.
-- Modbus field plane (`docs/modbus.md`): FC1–FC4/5/6/15/16. Reads may return
-  zeros in map holes; writes are all-or-nothing (`IllegalDataAddress`). FC16
-  walks cell starts so adjacent `uint16`s and `float32` pairs both update
-  `state.base`. TCP unit id must match YAML (`Ok(None)` otherwise).
+- Modbus field plane (`docs/modbus.md`): V1.1b3 / V1.0b. Reads and writes
+  exception 02 if the range is not fully implemented. Each PDU address is a
+  u16 (a one-word write into a `float32` pair splices that word). Native TCP
+  does not filter on MBAP unit id (`0xFF` / `0` are valid per V1.0b).
+- Documentation map (`docs/README.md`) and architecture explanation
+  (`docs/architecture.md`) with GitHub-safe Mermaid (flowchart, sequence,
+  state). README is the front door; contracts stay in `docs/`.
+- Tracing events from the Rust process: `simbus started` / `simbus stopping`,
+  `api listening`, `modbus server listening`, `fault injected` / `expired` /
+  `cleared`, `simulation reset`, `simulation base changed`, `alarm activated` /
+  `cleared`, `discrete changed`. There is no `register changed` event and no
+  periodic `simulation tick health` log.
+
+### Removed
+
+- Python 0.2.x tree (`simbus/`, `tests/`, `pyproject.toml`, `uv.lock`).
+- Global `scenarios/` catalog. Recipes now live under `scenarios:` in each
+  device YAML.
+- CI job `python-legacy` (`uv` / ruff / mypy / pytest). CI is Rust-only:
+  fmt, clippy, `cargo test --workspace --locked`, `simbus check` on `devices/`.
+
+---
+
+## [0.2.0] — 2026-04-28
+
+Python runtime (FastAPI + pymodbus). Superseded by the Rust workspace in
+Unreleased.
 
 ### Added
 
