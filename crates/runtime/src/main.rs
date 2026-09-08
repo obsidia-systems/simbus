@@ -12,6 +12,7 @@ use clap::{Args, Parser, Subcommand};
 use control::AppState;
 use engine::{Device, ScenarioRunner};
 use spec::{BindingSpec, device_report, load_device_from_path, load_device_from_str};
+use tokio::sync::watch;
 use tokio::time::{MissedTickBehavior, interval};
 use tracing::{error, info};
 
@@ -189,6 +190,7 @@ async fn main() -> Result<()> {
         .filter(|s| !s.is_empty())
         .collect();
 
+    let (snapshots, _) = watch::channel(device.snapshot());
     let state = AppState {
         device: device.clone(),
         scenarios,
@@ -196,6 +198,7 @@ async fn main() -> Result<()> {
         modbus_port,
         modbus_ready: modbus_ready.clone(),
         scenario_task: Arc::new(Mutex::new(None)),
+        snapshots: snapshots.clone(),
     };
 
     info!(
@@ -208,6 +211,7 @@ async fn main() -> Result<()> {
     );
 
     let tick_device = device.clone();
+    let tick_snapshots = snapshots;
     let mut tick_task = tokio::spawn(async move {
         let mut ticker = interval(Duration::from_secs_f64(
             tick_device.tick_interval().max(0.001),
@@ -216,7 +220,8 @@ async fn main() -> Result<()> {
         loop {
             ticker.tick().await;
             let dt = tick_device.tick_interval();
-            tick_device.tick(dt);
+            let snap = tick_device.tick(dt);
+            let _ = tick_snapshots.send(snap);
             let period = Duration::from_secs_f64(dt.max(0.001));
             if ticker.period() != period {
                 ticker = interval(period);

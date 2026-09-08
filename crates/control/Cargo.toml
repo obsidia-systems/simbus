@@ -1,0 +1,32 @@
+[package]
+name = "control"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+description = "HTTP control plane for a single simbus device"
+readme = "README.md"
+
+[lints]
+workspace = true
+
+[dependencies]
+axum = { workspace = true }
+futures-util = { workspace = true }
+http = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+engine = { workspace = true }
+spec = { workspace = true }
+tokio = { workspace = true }
+tokio-stream = { workspace = true }
+tower-http = { workspace = true }
+tracing = { workspace = true }
+utoipa = { workspace = true }
+utoipa-swagger-ui = { workspace = true }
+
+[dev-dependencies]
+http-body-util = { workspace = true }
+tower = { workspace = true }
