@@ -17,7 +17,7 @@ Classified with [Diátaxis](https://diataxis.fr/) so each page has one job.
 | [architecture.md](architecture.md) | Explanation | Process shape, crates, repo layout, sequences |
 | [spec.md](spec.md) | Reference | Device YAML language (boot contract) |
 | [runtime.md](runtime.md) | Reference | Binary, boot, CLI/env, signals, Docker |
-| [modbus.md](modbus.md) | Reference | Field plane: Modbus TCP PDU (V1.1b3 / V1.0b) |
+| [modbus.md](modbus.md) | Reference | Field plane: Modbus TCP PDU (V1.1b3 / V1.0b) and TLS wrap (IANA 802) |
 | [control.md](control.md) | Reference | Session HTTP (not the field protocol) |
 | [simulation.md](simulation.md) | Reference | Tick, `state.base`, behaviors, faults, encode |
 | [scenarios.md](scenarios.md) | How-to | Run and author bundled scenarios |

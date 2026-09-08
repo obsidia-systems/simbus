@@ -62,7 +62,10 @@ a coil or discrete that exists.
 Scenarios (optional) go in the same file under `scenarios:` with kebab-case
 `id`. Step names must exist on **this** map.
 
-Bindings: omit the list to infer Modbus TCP. Do not add `modbus-rtu`,
+Bindings: omit the list to infer Modbus TCP. `modbus-tls` is served (IANA
+802, `certfile`/`keyfile` required at boot, `cafile` optional for mTLS). Do
+**not** add it to `devices/builtin/` (Compose has no PEM). Dual-bind with
+`modbus-tcp` for 502 clear vs 802 TLS. Do not add `modbus-rtu`,
 `snmp-v2c`, `opcua`, `mqtt-sparkplug`, or `bacnet-ip` unless the user asked for
 syntax-only; `simbus check` accepts them, **boot refuses**.
 

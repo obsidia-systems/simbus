@@ -39,6 +39,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - `POST /scenarios` installs a session copy (JSON, same schema as the YAML).
   `DELETE /scenarios/{id}` drops it. Bundled ids return 409.
   `simbus ctl install` / `uninstall`.
+- Modbus Security: `protocol: modbus-tls` serves the same V1.1b3 PDU over TLS
+  (rustls) on IANA port **802**. Dual-bind with `modbus-tcp` is allowed.
+  `certfile`/`keyfile` required at boot; `cafile` optional (mTLS). Official
+  builtin maps stay cleartext TCP. Lab recipe: [README.md](README.md).
 - Simplified GitFlow (`CONTRIBUTING.md`): feature PRs to `develop`; `main` is
   the last published tree. A `v*` tag on `main` publishes GHCR and native
   binaries via `dist` (linux amd64/arm64, macOS aarch64, shell installer).
@@ -68,13 +72,17 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   exception 02 if the range is not fully implemented. Each PDU address is a
   u16 (a one-word write into a `float32` pair splices that word). Native TCP
   does not filter on MBAP unit id (`0xFF` / `0` are valid per V1.0b).
+  `modbus-tls` wraps that PDU in TLS (IANA 802); `/status.modbus_tls_port`
+  is `null` when the document has no TLS binding. `/readyz` waits for every
+  requested field listener.
 - Documentation map (`docs/README.md`) and architecture explanation
   (`docs/architecture.md`) with GitHub-safe Mermaid (flowchart, sequence,
   state). README is the front door; contracts stay in `docs/`. Crate tests
   and the device-map table live in those pages; there are no crate or
   `devices/` README files.
 - Tracing events from the Rust process: `simbus started` / `simbus stopping`,
-  `api listening`, `modbus server listening`, `fault injected` / `expired` /
+  `api listening`, `modbus server listening`, `modbus tls listening`,
+  `fault injected` / `expired` /
   `cleared`, `simulation reset`, `simulation paused` / `resumed`,
   `simulation base changed`, `alarm activated` /
   `cleared`, `discrete changed`. There is no `register changed` event.

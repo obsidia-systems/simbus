@@ -87,7 +87,13 @@ fn describe_binding(binding: &BindingSpec) -> String {
         BindingSpec::ModbusRtu { device, baudrate } => {
             format!("modbus-rtu {device} @{baudrate}")
         }
-        BindingSpec::ModbusTls { port, .. } => format!("modbus-tls :{port}"),
+        BindingSpec::ModbusTls { port, cafile, .. } => {
+            if cafile.is_some() {
+                format!("modbus-tls :{port} mTLS")
+            } else {
+                format!("modbus-tls :{port}")
+            }
+        }
         BindingSpec::SnmpV2c {
             port, community, ..
         } => {

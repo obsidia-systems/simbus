@@ -6,7 +6,7 @@ rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 authors.workspace = true
-description = "Modbus TCP slave for simbus"
+description = "Modbus TCP / TLS slave for simbus"
 publish = false
 
 [lints]
@@ -14,7 +14,14 @@ workspace = true
 
 [dependencies]
 engine = { workspace = true }
+rustls = { workspace = true }
+rustls-pki-types = { workspace = true }
 spec = { workspace = true }
 tokio = { workspace = true }
 tokio-modbus = { workspace = true, features = ["tcp-server"] }
+tokio-rustls = { workspace = true }
 tracing = { workspace = true }
+
+[dev-dependencies]
+rcgen = { version = "0.13", default-features = false, features = ["crypto", "pem", "ring"] }
+tokio-modbus = { workspace = true, features = ["tcp", "tcp-server"] }

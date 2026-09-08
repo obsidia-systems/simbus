@@ -89,6 +89,7 @@ curl http://localhost:8000/status
   "name": "Generic T&H Sensor",
   "type": "tnh_sensor",
   "modbus_port": 502,
+  "modbus_tls_port": null,
   "tick_interval": 1.0,
   "time_scale": 1.0,
   "simulation": "running",
@@ -114,6 +115,38 @@ curl --proto '=https' --tlsv1.2 -LsSf https://github.com/obsidia-systems/simbus/
 ```
 
 Until the first tag of this tree, use `cargo build -p simbus`.
+
+### Modbus TLS (IANA 802)
+
+Builtin maps stay **cleartext TCP**. To serve the same PDU over TLS, add a
+`modbus-tls` binding (and keep `modbus-tcp` if you want both 502 and 802).
+The process does not generate certificates:
+
+```bash
+openssl req -x509 -newkey rsa:2048 -nodes -days 365 \
+  -keyout key.pem -out cert.pem -subj "/CN=localhost"
+```
+
+YAML (do not commit this into `devices/builtin/`):
+
+```yaml
+bindings:
+  - protocol: modbus-tcp
+    port: 502
+  - protocol: modbus-tls
+    port: 802
+    certfile: cert.pem
+    keyfile: key.pem
+    # cafile: ca.pem   # optional; when set, clients must present a cert
+```
+
+```bash
+simbus --file device.yaml --modbus-cert cert.pem --modbus-key key.pem
+# SCADA: 502 without TLS vs 802 with TLS (trust cert.pem if self-signed)
+```
+
+Compose does not mount TLS by default. Add a volume and the binding when you
+want the lab.
 
 > [!NOTE]
 > **Requirements:** Rust 1.85+ (MSRV; edition 2024). Toolchain file tracks
@@ -802,8 +835,8 @@ timeline
     title simbus Roadmap
     v0.1 — Core : Modbus TCP, 7 templates, 6 behaviors, REST plus SSE, faults, Docker
     v0.2 — Scenarios : Playback API, recipes later moved into device YAML
-    v0.3 — Rust workspace : this tree — tokio-modbus, axum, file-only boot, pause, session scenarios, healthz/readyz/metrics
-    Specified not served : MQTT Sparkplug, SNMP v2c, BACnet/IP, OPC UA, Modbus RTU/TLS
+    v0.3 — Rust workspace : this tree — tokio-modbus, axum, file-only boot, pause, session scenarios, Modbus TLS 802, healthz/readyz/metrics
+    Specified not served : MQTT Sparkplug, SNMP v2c, BACnet/IP, OPC UA, Modbus RTU
 ```
 
 Unimplemented protocol **syntax** is already valid YAML (`simbus check` notes it;

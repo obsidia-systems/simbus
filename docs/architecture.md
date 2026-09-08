@@ -16,7 +16,8 @@ GitHub renders the Mermaid below. Syntax follows current
 
 ## 1. Context
 
-Operators boot a YAML file. SCADA talks Modbus TCP to the listen port.
+Operators boot a YAML file. SCADA talks Modbus TCP (and optionally TLS on
+IANA 802) to the listen port.
 Tests and GUIs talk HTTP to the control port. The two planes share one
 in-memory bank; they are not two devices.
 
@@ -26,7 +27,7 @@ flowchart LR
         scada[SCADA / Ignition]
         gui[GUI / curl / CI]
         subgraph proc [One simbus process]
-            mb[Modbus TCP]
+            mb[Modbus TCP / TLS]
             http[HTTP control]
             bank[(RegisterBank)]
             mb --- bank
@@ -69,9 +70,9 @@ flowchart TB
 | --- | --- | --- |
 | `spec` | YAML parse and `simbus check` | Open ports, tick |
 | `engine` | Bank, `tick(dt)`, faults, steps | Sockets, SSE, health logs |
-| `modbus` | TCP slave, V1.1b3 PDU | HTTP, tick |
+| `modbus` | TCP / TLS slave, V1.1b3 PDU | HTTP, tick |
 | `control` | Session HTTP + SSE | Modbus listen |
-| `runtime` | CLI, boot, three tasks, signals | A second YAML dialect |
+| `runtime` | CLI, boot, tick / field listeners / HTTP, signals | A second YAML dialect |
 
 CI is `cargo test --workspace --locked`. Per crate (no Markdown next to the
 crate; contracts are in this folder):
@@ -81,8 +82,8 @@ crate; contracts are in this folder):
 | `spec` | `cargo test -p spec` | `src/types.rs`; `tests/catalog.rs` (schema fixtures, not every YAML) |
 | `engine` | `cargo test -p engine` | `src/behaviors.rs`, `src/encode.rs`; `tests/engine.rs` |
 | `control` | `cargo test -p control` | `tests/http.rs` (probes, PATCH, faults, scenarios, API key, SSE) |
-| `modbus` | `cargo test -p modbus --locked` | FC1–FC4 / 5 / 6 / 15 / 16 and exceptions 02 / 03 |
-| `runtime` (`-p simbus`) | `cargo test -p simbus --locked` | clap (`--file`, `--tick`, `--time-scale`, `--seed`, `check`, `ctl`); default template |
+| `modbus` | `cargo test -p modbus --locked` | FC1–FC4 / 5 / 6 / 15 / 16, exceptions 02 / 03, FC3 over TLS |
+| `runtime` (`-p simbus`) | `cargo test -p simbus --locked` | clap (`--file`, `--tick`, `--time-scale`, `--seed`, TLS flags, `check`, `ctl`); default template |
 
 Device YAML is validated with `simbus check`, not a Rust test per file.
 
@@ -120,12 +121,12 @@ flowchart TB
     unimplemented -->|none, check| report
     unimplemented -->|none, boot| device[Device::new]
     device --> running[set_running true]
-    running --> spawn[Spawn tick, Modbus, HTTP]
+    running --> spawn[Spawn tick, field listeners, HTTP]
     spawn --> log[Log simbus started]
     log --> wait[Wait for signal or task death]
 ```
 
-Sequence of the three tasks after `Device::new`:
+Sequence of tick, field listeners, and HTTP after `Device::new`:
 
 ```mermaid
 sequenceDiagram
@@ -137,7 +138,7 @@ sequenceDiagram
     participant CTL as control
     Op->>RT: simbus --file device.yaml
     RT->>Eng: Device::new spec, seed, tick
-    RT->>MB: spawn serve port, unit_id
+    RT->>MB: spawn serve and/or serve_tls
     RT->>CTL: spawn serve host, api_port
     RT->>RT: log simbus started
     Note over MB,CTL: Tick loop publishes Snapshot on watch after every tick dt

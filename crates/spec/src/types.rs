@@ -178,7 +178,7 @@ impl ProtocolId {
     /// unimplemented.
     #[must_use]
     pub const fn is_implemented(self) -> bool {
-        matches!(self, Self::ModbusTcp)
+        matches!(self, Self::ModbusTcp | Self::ModbusTls)
     }
 }
 
@@ -508,14 +508,18 @@ pub enum BindingSpec {
         #[serde(default = "default_baud")]
         baudrate: u32,
     },
-    /// Modbus TLS slave.
+    /// Modbus TLS slave (IANA 802).
     ModbusTls {
         /// Listen port.
+        #[serde(default = "default_modbus_tls_port")]
         port: u16,
-        /// PEM certificate path.
+        /// PEM certificate path (required at boot).
         certfile: String,
-        /// PEM key path.
+        /// PEM key path (required at boot).
         keyfile: String,
+        /// Optional PEM CA; when set, the server requires a client certificate.
+        #[serde(default)]
+        cafile: Option<String>,
     },
     /// SNMP v2c agent.
     #[serde(rename = "snmp-v2c")]
@@ -557,6 +561,10 @@ pub enum BindingSpec {
 
 fn default_baud() -> u32 {
     9600
+}
+
+fn default_modbus_tls_port() -> u16 {
+    802
 }
 
 fn default_snmp_port() -> u16 {

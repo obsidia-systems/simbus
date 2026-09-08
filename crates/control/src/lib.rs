@@ -37,10 +37,14 @@ pub struct AppState {
     pub scenarios: Arc<ScenarioRunner>,
     /// Optional API key for write endpoints.
     pub api_key: Option<String>,
-    /// Modbus listen port advertised in `/status`.
+    /// Modbus TCP listen port advertised in `/status`.
     pub modbus_port: u16,
-    /// True when the Modbus socket is accepting connections.
+    /// TLS listen port, or `None` when the document has no `modbus-tls` binding.
+    pub modbus_tls_port: Option<u16>,
+    /// True when the Modbus TCP socket is accepting, or TCP was not requested.
     pub modbus_ready: Arc<AtomicBool>,
+    /// True when the Modbus TLS socket is accepting, or TLS was not requested.
+    pub modbus_tls_ready: Arc<AtomicBool>,
     /// In-flight scenario task, aborted on stop or when a new scenario starts.
     pub scenario_task: Arc<Mutex<Option<JoinHandle<()>>>>,
     /// Tick snapshots for SSE (`GET /registers/stream`).
@@ -53,6 +57,15 @@ impl AppState {
     /// Push the current bank to SSE subscribers (tick or session write).
     pub fn publish_snapshot(&self) {
         let _ = self.snapshots.send(self.device.snapshot());
+    }
+
+    /// Every requested field listener is accepting connections.
+    #[must_use]
+    pub fn field_listening(&self) -> bool {
+        self.modbus_ready.load(std::sync::atomic::Ordering::SeqCst)
+            && self
+                .modbus_tls_ready
+                .load(std::sync::atomic::Ordering::SeqCst)
     }
 }
 

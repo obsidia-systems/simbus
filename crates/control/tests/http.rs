@@ -29,7 +29,9 @@ fn tnh_state_with_key(api_key: Option<String>) -> AppState {
         scenarios: Arc::new(ScenarioRunner::new(device)),
         api_key,
         modbus_port: 5020,
+        modbus_tls_port: None,
         modbus_ready: Arc::new(AtomicBool::new(true)),
+        modbus_tls_ready: Arc::new(AtomicBool::new(true)),
         scenario_task: Arc::new(Mutex::new(None)),
         snapshots,
         time_scale: 1.0,
@@ -60,6 +62,7 @@ async fn status_reports_device() {
     let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
     assert_eq!(json["name"], "Generic T&H Sensor");
     assert_eq!(json["modbus_port"], 5020);
+    assert!(json["modbus_tls_port"].is_null());
     assert_eq!(json["simulation"], "running");
     assert_eq!(json["time_scale"], 1.0);
 }
@@ -298,6 +301,59 @@ async fn readyz_unavailable_when_not_running() {
         .await
         .unwrap();
     assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+}
+
+#[tokio::test]
+async fn status_and_readyz_dual_bind() {
+    let mut state = tnh_state();
+    state.modbus_tls_port = Some(802);
+    state.modbus_tls_ready = Arc::new(AtomicBool::new(false));
+    let app = control::router(state.clone(), &["*".to_owned()]);
+    let status = app
+        .clone()
+        .oneshot(Request::get("/status").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    let body = status.into_body().collect().await.unwrap().to_bytes();
+    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(json["modbus_tls_port"], 802);
+    assert_eq!(json["modbus_server"], "stopped");
+    let readyz = app
+        .oneshot(Request::get("/readyz").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    assert_eq!(readyz.status(), StatusCode::SERVICE_UNAVAILABLE);
+
+    state
+        .modbus_tls_ready
+        .store(true, std::sync::atomic::Ordering::SeqCst);
+    let app = control::router(state, &["*".to_owned()]);
+    let status = app
+        .clone()
+        .oneshot(Request::get("/status").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    let body = status.into_body().collect().await.unwrap().to_bytes();
+    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(json["modbus_server"], "listening");
+    let readyz = app
+        .oneshot(Request::get("/readyz").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    assert_eq!(readyz.status(), StatusCode::OK);
+}
+
+#[tokio::test]
+async fn readyz_tls_only() {
+    let mut state = tnh_state();
+    state.modbus_tls_port = Some(802);
+    state.modbus_ready = Arc::new(AtomicBool::new(true));
+    state.modbus_tls_ready = Arc::new(AtomicBool::new(true));
+    let response = control::router(state, &["*".to_owned()])
+        .oneshot(Request::get("/readyz").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
 }
 
 #[tokio::test]

@@ -237,3 +237,69 @@ registers:
     let report = device_report("snmp.yaml", &spec);
     assert!(report.contains("specified, not implemented"));
 }
+
+#[test]
+fn modbus_tls_is_implemented_with_default_port() {
+    let yaml = r"
+name: tls-box
+version: '1.0'
+type: meter
+modbus:
+  default_port: 502
+bindings:
+  - protocol: modbus-tls
+    certfile: cert.pem
+    keyfile: key.pem
+registers:
+  holding:
+    - address: 0
+      name: watts
+      default: 1.0
+";
+    let spec = load_device_from_str(yaml).unwrap();
+    assert!(spec.unimplemented_protocols().is_empty());
+    match &spec.resolved_bindings()[0] {
+        spec::BindingSpec::ModbusTls {
+            port,
+            certfile,
+            keyfile,
+            cafile,
+        } => {
+            assert_eq!(*port, 802);
+            assert_eq!(certfile, "cert.pem");
+            assert_eq!(keyfile, "key.pem");
+            assert!(cafile.is_none());
+        }
+        other => panic!("expected modbus-tls, got {other:?}"),
+    }
+    let report = device_report("tls.yaml", &spec);
+    assert!(!report.contains("specified, not implemented"));
+    assert!(report.contains("modbus-tls :802"));
+}
+
+#[test]
+fn modbus_tls_parses_cafile() {
+    let yaml = r"
+name: mtls-box
+version: '1.0'
+type: meter
+modbus:
+  default_port: 502
+bindings:
+  - protocol: modbus-tcp
+  - protocol: modbus-tls
+    port: 8802
+    certfile: /tmp/cert.pem
+    keyfile: /tmp/key.pem
+    cafile: /tmp/ca.pem
+registers:
+  holding:
+    - address: 0
+      name: watts
+      default: 1.0
+";
+    let spec = load_device_from_str(yaml).unwrap();
+    assert!(spec.unimplemented_protocols().is_empty());
+    let report = device_report("mtls.yaml", &spec);
+    assert!(report.contains("modbus-tls :8802 mTLS"));
+}

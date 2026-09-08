@@ -7,15 +7,20 @@
 use std::future;
 use std::io;
 use std::net::SocketAddr;
+use std::path::Path;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use engine::{Device, DeviceError};
+use rustls::RootCertStore;
+use rustls::server::WebPkiClientVerifier;
+use rustls_pki_types::{CertificateDer, PrivateKeyDer, pem::PemObject};
 use spec::RegisterSpace;
 use tokio::net::TcpListener;
 use tokio_modbus::prelude::*;
 use tokio_modbus::server::Service;
 use tokio_modbus::server::tcp::{Server, accept_tcp_connection};
+use tokio_rustls::TlsAcceptor;
 use tracing::info;
 
 /// V1.1b3 quantity maxima (PDU size inherited from the 256-byte serial ADU).
@@ -153,6 +158,132 @@ pub async fn serve(
     };
     let on_error = |err| {
         tracing::error!(error = %err, "modbus server error");
+    };
+
+    let _ = server
+        .serve_until(&on_connected, on_error, shutdown)
+        .await?;
+    ready.store(false, Ordering::SeqCst);
+    Ok(())
+}
+
+fn install_crypto_provider() {
+    let _ = rustls::crypto::ring::default_provider().install_default();
+}
+
+fn load_certs(path: &Path) -> io::Result<Vec<CertificateDer<'static>>> {
+    CertificateDer::pem_file_iter(path)
+        .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))
+}
+
+fn load_key(path: &Path) -> io::Result<PrivateKeyDer<'static>> {
+    PrivateKeyDer::from_pem_file(path)
+        .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))
+}
+
+fn tls_server_config(
+    certfile: &Path,
+    keyfile: &Path,
+    cafile: Option<&Path>,
+) -> io::Result<rustls::ServerConfig> {
+    install_crypto_provider();
+    let certs = load_certs(certfile)?;
+    if certs.is_empty() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("no certificates in {}", certfile.display()),
+        ));
+    }
+    let key = load_key(keyfile)?;
+    let builder = rustls::ServerConfig::builder();
+    let config = if let Some(ca) = cafile {
+        let mut roots = RootCertStore::empty();
+        let cas = load_certs(ca)?;
+        let (added, _) = roots.add_parsable_certificates(cas);
+        if added == 0 {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("no CA certificates in {}", ca.display()),
+            ));
+        }
+        let verifier = WebPkiClientVerifier::builder(Arc::new(roots))
+            .build()
+            .map_err(|err| io::Error::new(io::ErrorKind::InvalidInput, err))?;
+        builder
+            .with_client_cert_verifier(verifier)
+            .with_single_cert(certs, key)
+    } else {
+        builder.with_no_client_auth().with_single_cert(certs, key)
+    };
+    config.map_err(|err| io::Error::new(io::ErrorKind::InvalidInput, err))
+}
+
+/// PEM paths and listen settings for [`serve_tls`].
+pub struct TlsOptions<'a> {
+    /// Listen port (IANA 802 by default at the YAML layer).
+    pub port: u16,
+    /// YAML unit id (identity / future RTU). Not used to filter TCP.
+    pub unit_id: u8,
+    /// Server certificate PEM.
+    pub certfile: &'a Path,
+    /// Server private key PEM.
+    pub keyfile: &'a Path,
+    /// Optional client CA PEM; when set, mTLS is required.
+    pub cafile: Option<&'a Path>,
+}
+
+/// Listen for Modbus TCP over TLS until `shutdown` resolves (stop accepting).
+///
+/// The PDU is the same as [`serve`]. A failed handshake drops that connection
+/// and keeps listening.
+pub async fn serve_tls(
+    device: Arc<Device>,
+    options: TlsOptions<'_>,
+    ready: Arc<AtomicBool>,
+    shutdown: impl std::future::Future<Output = ()> + Send + Sync + 'static,
+) -> io::Result<()> {
+    let config = tls_server_config(options.certfile, options.keyfile, options.cafile)?;
+    let addr = SocketAddr::from(([0, 0, 0, 0], options.port));
+    let listener = TcpListener::bind(addr).await?;
+    serve_tls_with(device, listener, options.unit_id, config, ready, shutdown).await
+}
+
+async fn serve_tls_with(
+    device: Arc<Device>,
+    listener: TcpListener,
+    unit_id: u8,
+    config: rustls::ServerConfig,
+    ready: Arc<AtomicBool>,
+    shutdown: impl std::future::Future<Output = ()> + Send + Sync + 'static,
+) -> io::Result<()> {
+    let acceptor = TlsAcceptor::from(Arc::new(config));
+    let bound = listener.local_addr()?;
+    ready.store(true, Ordering::SeqCst);
+    info!(port = bound.port(), unit_id, "modbus tls listening");
+
+    let server = Server::new(listener);
+    let service = DeviceService { device };
+    let on_connected = move |stream, socket_addr: SocketAddr| {
+        let acceptor = acceptor.clone();
+        let service = service.clone();
+        async move {
+            match acceptor.accept(stream).await {
+                Ok(tls) => Ok(Some((service, tls))),
+                Err(err) => {
+                    tracing::warn!(
+                        error = %err,
+                        peer = %socket_addr,
+                        "modbus tls handshake failed"
+                    );
+                    Ok(None)
+                }
+            }
+        }
+    };
+    let on_error = |err| {
+        tracing::error!(error = %err, "modbus tls server error");
     };
 
     let _ = server
@@ -316,5 +447,69 @@ registers:
             .handle(Request::ReadCoils(0, 3))
             .expect_err("qty covers a missing coil");
         assert_eq!(err, ExceptionCode::IllegalDataAddress);
+    }
+
+    fn write_self_signed_pem(dir: &std::path::Path) -> (std::path::PathBuf, std::path::PathBuf) {
+        let certified = rcgen::generate_simple_self_signed(vec!["localhost".to_owned()]).unwrap();
+        let cert_path = dir.join("cert.pem");
+        let key_path = dir.join("key.pem");
+        std::fs::write(&cert_path, certified.cert.pem()).unwrap();
+        std::fs::write(&key_path, certified.key_pair.serialize_pem()).unwrap();
+        (cert_path, key_path)
+    }
+
+    #[tokio::test]
+    async fn fc3_over_tls() {
+        let dir = std::env::temp_dir().join(format!("simbus-modbus-tls-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let (cert_path, key_path) = write_self_signed_pem(&dir);
+
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let ready = Arc::new(AtomicBool::new(false));
+        let config = tls_server_config(&cert_path, &key_path, None).unwrap();
+        let (stop_tx, stop_rx) = tokio::sync::oneshot::channel::<()>();
+        let server = tokio::spawn(serve_tls_with(
+            tnh(),
+            listener,
+            1,
+            config,
+            ready.clone(),
+            async move {
+                let _ = stop_rx.await;
+            },
+        ));
+
+        let started = tokio::time::Instant::now();
+        while !ready.load(Ordering::SeqCst) {
+            if started.elapsed() > std::time::Duration::from_secs(2) {
+                panic!("tls listener did not become ready");
+            }
+            tokio::task::yield_now().await;
+        }
+
+        install_crypto_provider();
+        let mut roots = rustls::RootCertStore::empty();
+        let certs = load_certs(&cert_path).unwrap();
+        let (added, _) = roots.add_parsable_certificates(certs);
+        assert!(added > 0, "test CA");
+        let client_cfg = rustls::ClientConfig::builder()
+            .with_root_certificates(roots)
+            .with_no_client_auth();
+        let connector = tokio_rustls::TlsConnector::from(Arc::new(client_cfg));
+        let stream = tokio::net::TcpStream::connect(("127.0.0.1", port))
+            .await
+            .unwrap();
+        stream.set_nodelay(true).unwrap();
+        let server_name = rustls::pki_types::ServerName::try_from("localhost").unwrap();
+        let tls = connector.connect(server_name, stream).await.unwrap();
+        let mut ctx = tokio_modbus::client::tcp::attach(tls);
+        let words = ctx.read_holding_registers(0, 2).await.unwrap().unwrap();
+        assert_eq!(words, vec![225, 450]);
+        ctx.disconnect().await.unwrap();
+
+        let _ = stop_tx.send(());
+        let _ = server.await;
+        std::fs::remove_dir_all(&dir).ok();
     }
 }

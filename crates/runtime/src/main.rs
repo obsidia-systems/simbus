@@ -4,6 +4,7 @@
 
 mod ctl;
 
+use std::future::pending;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex};
@@ -15,6 +16,7 @@ use control::AppState;
 use engine::{Device, ScenarioRunner};
 use spec::{BindingSpec, device_report, load_device_from_path, load_device_from_str};
 use tokio::sync::watch;
+use tokio::task::JoinHandle;
 use tokio::time::{MissedTickBehavior, interval};
 use tracing::{error, info};
 
@@ -55,6 +57,18 @@ struct RunArgs {
     /// Modbus TCP port (overrides YAML)
     #[arg(short, long, env = "SIMBUS_MODBUS_PORT")]
     port: Option<u16>,
+    /// Modbus TLS port (overrides YAML; ignored unless the document has modbus-tls)
+    #[arg(long, env = "SIMBUS_MODBUS_TLS_PORT")]
+    modbus_tls_port: Option<u16>,
+    /// TLS server certificate PEM (overrides YAML certfile)
+    #[arg(long, env = "SIMBUS_MODBUS_CERT")]
+    modbus_cert: Option<PathBuf>,
+    /// TLS server private key PEM (overrides YAML keyfile)
+    #[arg(long, env = "SIMBUS_MODBUS_KEY")]
+    modbus_key: Option<PathBuf>,
+    /// Optional client CA PEM for mTLS (overrides YAML cafile)
+    #[arg(long, env = "SIMBUS_MODBUS_CA")]
+    modbus_ca: Option<PathBuf>,
     /// Override device name
     #[arg(short, long, env = "SIMBUS_DEVICE_NAME")]
     name: Option<String>,
@@ -120,27 +134,83 @@ fn check_file(path: &Path) -> Result<String> {
     Ok(device_report(&path.display().to_string(), &spec))
 }
 
-fn modbus_listen(spec: &spec::DeviceSpec, port_override: Option<u16>) -> (u16, u8) {
-    let mut port = spec.modbus.default_port;
+#[derive(Debug)]
+struct TlsBind {
+    port: u16,
+    certfile: PathBuf,
+    keyfile: PathBuf,
+    cafile: Option<PathBuf>,
+}
+
+#[derive(Debug)]
+struct FieldListeners {
+    tcp: Option<(u16, u8)>,
+    tls: Option<TlsBind>,
+}
+
+fn require_pem(path: &Path, label: &str) -> Result<()> {
+    if !path.is_file() {
+        bail!("modbus-tls {label} not found: {}", path.display());
+    }
+    Ok(())
+}
+
+fn field_listeners(spec: &spec::DeviceSpec, args: &RunArgs) -> Result<FieldListeners> {
     let mut unit_id = spec.modbus.unit_id;
+    let mut tcp_port: Option<u16> = None;
+    let mut tls: Option<TlsBind> = None;
     for binding in spec.resolved_bindings() {
-        if let BindingSpec::ModbusTcp {
-            port: bind_port,
-            unit_id: bind_unit,
-        } = binding
-        {
-            if let Some(p) = bind_port {
-                port = p;
+        match binding {
+            BindingSpec::ModbusTcp {
+                port: bind_port,
+                unit_id: bind_unit,
+            } => {
+                if let Some(u) = bind_unit {
+                    unit_id = u;
+                }
+                tcp_port = Some(bind_port.unwrap_or(spec.modbus.default_port));
             }
-            if let Some(u) = bind_unit {
-                unit_id = u;
+            BindingSpec::ModbusTls {
+                port,
+                certfile,
+                keyfile,
+                cafile,
+            } => {
+                let certfile = args
+                    .modbus_cert
+                    .clone()
+                    .unwrap_or_else(|| PathBuf::from(certfile));
+                let keyfile = args
+                    .modbus_key
+                    .clone()
+                    .unwrap_or_else(|| PathBuf::from(keyfile));
+                let cafile = args.modbus_ca.clone().or_else(|| cafile.map(PathBuf::from));
+                tls = Some(TlsBind {
+                    port: args.modbus_tls_port.unwrap_or(port),
+                    certfile,
+                    keyfile,
+                    cafile,
+                });
             }
+            _ => {}
         }
     }
-    if let Some(p) = port_override {
-        port = p;
+    if let Some(p) = args.port {
+        if tcp_port.is_some() {
+            tcp_port = Some(p);
+        }
     }
-    (port, unit_id)
+    if let Some(ref tls) = tls {
+        require_pem(&tls.certfile, "certfile")?;
+        require_pem(&tls.keyfile, "keyfile")?;
+        if let Some(ref ca) = tls.cafile {
+            require_pem(ca, "cafile")?;
+        }
+    }
+    Ok(FieldListeners {
+        tcp: tcp_port.map(|port| (port, unit_id)),
+        tls,
+    })
 }
 
 async fn shutdown_signal() {
@@ -202,12 +272,17 @@ async fn main() -> Result<()> {
     }
 
     let spec = load_spec(&args)?;
-    let (modbus_port, unit_id) = modbus_listen(&spec, args.port);
+    let listeners = field_listeners(&spec, &args)?;
+    let tcp = listeners.tcp;
+    let tls = listeners.tls;
+    let modbus_port = tcp.map(|(p, _)| p).unwrap_or(spec.modbus.default_port);
+    let modbus_tls_port = tls.as_ref().map(|t| t.port);
     let device = Device::new(spec, args.seed, args.tick);
     device.set_running(true);
 
     let scenarios = Arc::new(ScenarioRunner::new(device.clone()));
-    let modbus_ready = Arc::new(AtomicBool::new(false));
+    let tcp_ready = Arc::new(AtomicBool::new(tcp.is_none()));
+    let tls_ready = Arc::new(AtomicBool::new(tls.is_none()));
     let cors: Vec<String> = args
         .cors_origins
         .split(',')
@@ -221,7 +296,9 @@ async fn main() -> Result<()> {
         scenarios,
         api_key: args.api_key,
         modbus_port,
-        modbus_ready: modbus_ready.clone(),
+        modbus_tls_port,
+        modbus_ready: tcp_ready.clone(),
+        modbus_tls_ready: tls_ready.clone(),
         scenario_task: Arc::new(Mutex::new(None)),
         snapshots: snapshots.clone(),
         time_scale: args.time_scale,
@@ -232,6 +309,7 @@ async fn main() -> Result<()> {
         r#type = %device.spec().device_type,
         api_port = args.api_port,
         modbus_port,
+        modbus_tls_port,
         tick_interval = args.tick,
         time_scale = args.time_scale,
         "simbus started"
@@ -255,18 +333,49 @@ async fn main() -> Result<()> {
         .await;
     });
 
-    let mut modbus_shutdown = cancel_tx.subscribe();
-    let modbus_device = device.clone();
-    let mut modbus_task = tokio::spawn(async move {
-        let stop = async move {
-            let _ = modbus_shutdown.wait_for(|stop| *stop).await;
-        };
-        if let Err(err) =
-            modbus::serve(modbus_device, modbus_port, unit_id, modbus_ready, stop).await
-        {
-            error!(error = %err, "modbus server failed");
-        }
-    });
+    let mut tcp_task: Option<JoinHandle<()>> = None;
+    if let Some((port, unit_id)) = tcp {
+        let mut shutdown = cancel_tx.subscribe();
+        let modbus_device = device.clone();
+        let ready = tcp_ready;
+        tcp_task = Some(tokio::spawn(async move {
+            let stop = async move {
+                let _ = shutdown.wait_for(|stop| *stop).await;
+            };
+            if let Err(err) = modbus::serve(modbus_device, port, unit_id, ready, stop).await {
+                error!(error = %err, "modbus server failed");
+            }
+        }));
+    }
+
+    let mut tls_task: Option<JoinHandle<()>> = None;
+    if let Some(tls) = tls {
+        let mut shutdown = cancel_tx.subscribe();
+        let modbus_device = device.clone();
+        let ready = tls_ready;
+        let unit_id = tcp.map(|(_, u)| u).unwrap_or(device.spec().modbus.unit_id);
+        tls_task = Some(tokio::spawn(async move {
+            let stop = async move {
+                let _ = shutdown.wait_for(|stop| *stop).await;
+            };
+            if let Err(err) = modbus::serve_tls(
+                modbus_device,
+                modbus::TlsOptions {
+                    port: tls.port,
+                    unit_id,
+                    certfile: &tls.certfile,
+                    keyfile: &tls.keyfile,
+                    cafile: tls.cafile.as_deref(),
+                },
+                ready,
+                stop,
+            )
+            .await
+            {
+                error!(error = %err, "modbus tls server failed");
+            }
+        }));
+    }
 
     let mut api_shutdown = cancel_tx.subscribe();
     let api_host = args.host.clone();
@@ -286,8 +395,12 @@ async fn main() -> Result<()> {
             error!(?res, "tick loop ended");
             false
         }
-        res = &mut modbus_task => {
-            error!(?res, "modbus task ended");
+        _ = wait_optional_task(&mut tcp_task) => {
+            error!("modbus tcp task ended");
+            false
+        }
+        _ = wait_optional_task(&mut tls_task) => {
+            error!("modbus tls task ended");
             false
         }
         res = &mut api_task => {
@@ -301,16 +414,20 @@ async fn main() -> Result<()> {
         let _ = cancel_tx.send(true);
         if args.shutdown_timeout <= 0.0 {
             tick_task.abort();
-            modbus_task.abort();
+            abort_optional(&tcp_task);
+            abort_optional(&tls_task);
             api_task.abort();
         } else {
             tokio::select! {
                 _ = async {
-                    let _ = tokio::join!(&mut tick_task, &mut modbus_task, &mut api_task);
+                    join_optional(&mut tcp_task).await;
+                    join_optional(&mut tls_task).await;
+                    let _ = tokio::join!(&mut tick_task, &mut api_task);
                 } => {}
                 () = tokio::time::sleep(Duration::from_secs_f64(args.shutdown_timeout)) => {
                     tick_task.abort();
-                    modbus_task.abort();
+                    abort_optional(&tcp_task);
+                    abort_optional(&tls_task);
                     api_task.abort();
                 }
             }
@@ -318,9 +435,31 @@ async fn main() -> Result<()> {
         Ok(())
     } else {
         tick_task.abort();
-        modbus_task.abort();
+        abort_optional(&tcp_task);
+        abort_optional(&tls_task);
         api_task.abort();
         bail!("a runtime task ended unexpectedly")
+    }
+}
+
+async fn wait_optional_task(task: &mut Option<JoinHandle<()>>) {
+    match task {
+        Some(handle) => {
+            let _ = handle.await;
+        }
+        None => pending().await,
+    }
+}
+
+async fn join_optional(task: &mut Option<JoinHandle<()>>) {
+    if let Some(handle) = task {
+        let _ = handle.await;
+    }
+}
+
+fn abort_optional(task: &Option<JoinHandle<()>>) {
+    if let Some(handle) = task {
+        handle.abort();
     }
 }
 
@@ -515,5 +654,93 @@ registers:
         assert!(check_file(&path).is_err());
         std::fs::remove_file(&path).ok();
         std::fs::remove_dir(&dir).ok();
+    }
+
+    fn tls_yaml(cert: &str, key: &str) -> String {
+        format!(
+            r"
+name: tls-fix
+version: '1.0'
+type: fixture
+modbus:
+  default_port: 502
+  unit_id: 1
+bindings:
+  - protocol: modbus-tcp
+  - protocol: modbus-tls
+    certfile: {cert}
+    keyfile: {key}
+registers:
+  holding:
+    - address: 0
+      name: temperature
+      default: 22.5
+      scale: 10
+      data_type: uint16
+"
+        )
+    }
+
+    #[test]
+    fn parses_tls_flags() {
+        let cli = Cli::try_parse_from([
+            "simbus",
+            "--modbus-cert",
+            "cert.pem",
+            "--modbus-key",
+            "key.pem",
+            "--modbus-tls-port",
+            "8802",
+            "--modbus-ca",
+            "ca.pem",
+        ])
+        .unwrap();
+        assert_eq!(cli.run.modbus_tls_port, Some(8802));
+        assert_eq!(cli.run.modbus_cert.as_deref(), Some(Path::new("cert.pem")));
+        assert_eq!(cli.run.modbus_key.as_deref(), Some(Path::new("key.pem")));
+        assert_eq!(cli.run.modbus_ca.as_deref(), Some(Path::new("ca.pem")));
+    }
+
+    #[test]
+    fn default_bindings_are_tcp_only() {
+        let spec = load_device_from_str(sample_yaml()).unwrap();
+        let args = Cli::try_parse_from(["simbus"]).unwrap().run;
+        let listeners = field_listeners(&spec, &args).unwrap();
+        assert_eq!(listeners.tcp, Some((502, 1)));
+        assert!(listeners.tls.is_none());
+    }
+
+    #[test]
+    fn tls_boot_fails_without_pem() {
+        let spec =
+            load_device_from_str(&tls_yaml("/no/such/cert.pem", "/no/such/key.pem")).unwrap();
+        let args = Cli::try_parse_from(["simbus"]).unwrap().run;
+        let err = field_listeners(&spec, &args).unwrap_err();
+        assert!(err.to_string().contains("certfile not found"));
+    }
+
+    #[test]
+    fn port_override_does_not_change_tls_port() {
+        let dir = std::env::temp_dir().join(format!("simbus-tls-pem-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let cert = dir.join("cert.pem");
+        let key = dir.join("key.pem");
+        std::fs::write(&cert, "placeholder").unwrap();
+        std::fs::write(&key, "placeholder").unwrap();
+        let spec = load_device_from_str(&tls_yaml(
+            &cert.display().to_string(),
+            &key.display().to_string(),
+        ))
+        .unwrap();
+        let args = Cli::try_parse_from(["simbus", "--port", "1502", "--modbus-tls-port", "8802"])
+            .unwrap()
+            .run;
+        let (tcp, tls) = {
+            let listeners = field_listeners(&spec, &args).unwrap();
+            (listeners.tcp, listeners.tls)
+        };
+        assert_eq!(tcp, Some((1502, 1)));
+        assert_eq!(tls.unwrap().port, 8802);
+        std::fs::remove_dir_all(&dir).ok();
     }
 }

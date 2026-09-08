@@ -1,7 +1,5 @@
 //! Status, config, and probes.
 
-use std::sync::atomic::Ordering;
-
 use axum::Json;
 use axum::extract::State;
 use axum::http::StatusCode;
@@ -17,11 +15,11 @@ fn behavior_name(spec: Option<&BehaviorSpec>) -> Option<String> {
 #[utoipa::path(get, path = "/status", responses((status = 200)))]
 pub async fn get_status(State(state): State<AppState>) -> Json<StatusResponse> {
     let spec = state.device.spec();
-    let listening = state.modbus_ready.load(Ordering::SeqCst);
     Json(StatusResponse {
         name: spec.name.clone(),
         device_type: spec.device_type.clone(),
         modbus_port: state.modbus_port,
+        modbus_tls_port: state.modbus_tls_port,
         tick_interval: state.device.tick_interval(),
         time_scale: state.time_scale,
         simulation: if state.device.is_running() {
@@ -29,7 +27,11 @@ pub async fn get_status(State(state): State<AppState>) -> Json<StatusResponse> {
         } else {
             "stopped"
         },
-        modbus_server: if listening { "listening" } else { "stopped" },
+        modbus_server: if state.field_listening() {
+            "listening"
+        } else {
+            "stopped"
+        },
     })
 }
 
@@ -97,7 +99,7 @@ pub async fn healthz() -> StatusCode {
 
 #[utoipa::path(get, path = "/readyz", responses((status = 200), (status = 503)))]
 pub async fn readyz(State(state): State<AppState>) -> StatusCode {
-    if state.modbus_ready.load(Ordering::SeqCst) && state.device.is_running() {
+    if state.field_listening() && state.device.is_running() {
         StatusCode::OK
     } else {
         StatusCode::SERVICE_UNAVAILABLE

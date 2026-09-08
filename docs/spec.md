@@ -194,7 +194,7 @@ bindings:
 | --- | --- | --- |
 | `modbus-tcp` | yes | **yes** |
 | `modbus-rtu` | yes | no |
-| `modbus-tls` | yes | no |
+| `modbus-tls` | yes | **yes** |
 | `snmp-v2c` | yes | no |
 | `opcua` | yes | no |
 | `mqtt-sparkplug` | yes | no |
@@ -217,7 +217,16 @@ To add a protocol: extend this section and `BindingSpec` first, keep
 
 **`modbus-rtu`** — specified, not implemented: `device` (path), `baudrate` (default 9600).
 
-**`modbus-tls`** — specified, not implemented: `port`, `certfile`, `keyfile`.
+**`modbus-tls`** — served (same PDU as `modbus-tcp`, TLS wrap, IANA **802**):
+
+| Field | Type | Default |
+| --- | --- | --- |
+| `port` | uint16? | `802` |
+| `certfile` | string | required at **boot** (PEM). `simbus check` does not open the file |
+| `keyfile` | string | required at **boot** (PEM). Same as `certfile` |
+| `cafile` | string? | omitted: server authenticates, client cert not required. Set to a PEM CA to require mTLS |
+
+CLI/env may override `certfile` / `keyfile` / `cafile` / `port` ([runtime.md](runtime.md)). They do not rewrite the YAML. Missing or unreadable PEM at boot MUST fail the process (do not start a half-ready listener). Official maps under `devices/builtin/` MUST NOT declare this binding (Compose would need mounted PEM). Dual-bind: list `modbus-tcp` **and** `modbus-tls` in the same document.
 
 **`snmp-v2c`** — specified, not implemented: `port` (default 161), `community` (default `public`), `map` (optional OID file).
 
@@ -447,9 +456,10 @@ After a successful parse:
 4. Start the tick loop, Modbus TCP (if bound), and the HTTP control plane.
 5. Leave scenarios idle until `POST /scenarios/{id}/run`.
 
-CLI overrides (`--port`, `--name`, `--tick`, `--seed`) apply after load. They
-do not rewrite the file. Process lifecycle, signals, and flags:
-[runtime.md](runtime.md).
+CLI overrides (`--port`, `--modbus-tls-port`, `--modbus-cert` / `--modbus-key`
+/ `--modbus-ca`, `--name`, `--tick`, `--seed`) apply after load. They do not
+rewrite the file. `--port` overrides **TCP** only. Process lifecycle, signals,
+and flags: [runtime.md](runtime.md).
 
 ---
 

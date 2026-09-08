@@ -81,16 +81,19 @@ GET (including SSE) is not keyed. Missing/wrong key on a write MUST 401.
 
 | Method | Path | Notes |
 | --- | --- | --- |
-| `GET` | `/status` | Live: name, type, **listen** Modbus port, tick, `time_scale`, `running`/`stopped`, Modbus `listening`/`stopped` |
+| `GET` | `/status` | Live: name, type, **listen** Modbus TCP port, `modbus_tls_port` (`null` if no TLS binding), tick, `time_scale`, `running`/`stopped`, field plane `listening`/`stopped` |
 | `GET` | `/config` | Document snapshot: map, `spec_version`, endianness, YAML `modbus.default_port`, bundled scenarios |
 | `GET` | `/healthz` | Liveness (always 200 if the task is up) |
-| `GET` | `/readyz` | 200 when Modbus is listening **and** the simulation is running; else 503 (paused → 503) |
+| `GET` | `/readyz` | 200 when **every** requested field listener is up **and** the simulation is running; else 503 (paused → 503). TLS-only: TCP is not required. Dual-bind: both TCP and TLS |
 | `GET` | `/metrics` | Prometheus text |
 | `GET` | `/docs` | Swagger UI |
 | `GET` | `/api-docs/openapi.json` | OpenAPI 3. The document MUST list every route in this section |
 
-`/status.modbus_port` is what the process is listening on (`--port`).
-`/config.modbus_port` is the YAML default. They differ when CLI overrides.
+`/status.modbus_port` is the cleartext TCP listen port (`--port`).
+`/status.modbus_tls_port` is the TLS listen port, or JSON `null` when the
+document has no `modbus-tls` binding.
+`/config.modbus_port` is the YAML `modbus.default_port`. TCP listen and YAML
+default differ when CLI overrides `--port`.
 
 ### Registers
 

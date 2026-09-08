@@ -7,7 +7,7 @@ Documentation map: `llms.txt`.
 
 ## Product
 
-Industrial Modbus TCP field-device simulator. **One process = one device.**
+Industrial Modbus TCP/TLS field-device simulator. **One process = one device.**
 Binary name `simbus`. Crates: `spec`, `engine`, `control`, `modbus`, `runtime`.
 
 **Version in this tree: `0.3.0`** (`[workspace.package]` in `Cargo.toml`).
@@ -20,7 +20,8 @@ invent a different semver in docs or crates.
 the calendar year.
 
 The device YAML is the boot contract (`docs/spec.md`). Session mutations are
-HTTP (`docs/control.md`). Modbus is the field plane (`docs/modbus.md`).
+HTTP (`docs/control.md`). Modbus TCP and TLS (IANA 802) are the field plane
+(`docs/modbus.md`).
 
 There is no Python tree, no `scenarios/` folder, no `--type` selector.
 
@@ -89,7 +90,8 @@ together. New code, comments, and docs are English.
 
 - `spec`: no tokio, no sockets.
 - `engine`: no sockets, no SSE, no process health logs. `tick(dt)` only.
-- `modbus`: field plane. Follow industry Modbus (V1.1b3 / V1.0b), not invented policy.
+- `modbus`: field plane. Follow industry Modbus (V1.1b3 / V1.0b); TLS is a wrap
+  of that PDU (IANA 802), not a second protocol.
 - `control`: session HTTP. Must not enlarge the register map.
 - `runtime`: one binary, file-only boot (`--file` / `SIMBUS_YAML_PATH`, else
   `devices/builtin/default.yaml` or embedded). `simbus check` needs an explicit path.
