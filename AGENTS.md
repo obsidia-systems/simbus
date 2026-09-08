@@ -1,0 +1,175 @@
+# simbus
+
+Instructions for coding agents working **in this repository** (build, tests,
+contracts). Not a device-authoring playbook — that is
+`.agents/skills/simbus-device/SKILL.md` ([Agent Skills](https://agentskills.io/home)).
+Documentation map: `llms.txt`.
+
+## Product
+
+Industrial Modbus TCP field-device simulator. **One process = one device.**
+Binary name `simbus`. Crates: `spec`, `engine`, `control`, `modbus`, `runtime`.
+
+**Version in this tree: `0.3.0`** (`[workspace.package]` in `Cargo.toml`).
+That is the version we are working on (unreleased until tagged). Do not
+invent a different semver in docs or crates.
+
+**Rust:** there is **no official LTS**. `rust-version = "1.85"` is the
+**MSRV** (floor for edition 2024). `rust-toolchain.toml` is `channel = "stable"`
+(CI uses the current stable). Edition **2024** is the language edition, not
+the calendar year.
+
+The device YAML is the boot contract (`docs/spec.md`). Session mutations are
+HTTP (`docs/control.md`). Modbus is the field plane (`docs/modbus.md`).
+
+There is no Python tree, no `scenarios/` folder, no `--type` selector.
+
+## Agent skill (device YAML)
+
+Canonical folder: `.agents/skills/simbus-device/` (a skill is a directory with
+`SKILL.md`; it does **not** need its own git repo). Do not put `SKILL.md` at
+the repo root (the Skills CLI would treat the whole product as one skill).
+`.cursor/` is local editor state (gitignored), not the skill home.
+
+In this clone, agents load it as a project skill. Into another workspace:
+
+```bash
+npx skills add obsidia-systems/simbus@simbus-device
+```
+
+## Keep docs and agent surfaces in sync
+
+When an implementation changes a contract, CLI, HTTP route, device map, or
+authoring workflow, update **in the same change** every surface that still
+applies:
+
+- Normative docs in `docs/`
+- `README.md` if the front door would become wrong
+- `CHANGELOG.md` (`## [Unreleased]`). On a **release**, also bump every row
+  under [Release](#release) (Cargo workspace, this file, CHANGELOG heading,
+  README roadmap if it names the current series)
+- `AGENTS.md` if build/test/constraints for agents changed
+- `llms.txt` if the documentation map changed
+- `.agents/skills/simbus-device/SKILL.md` if how to write a device YAML changed
+
+Do not leave a skill or `llms.txt` describing a flag, folder, or protocol
+that the code no longer has. Skip a file only when it is truly unaffected.
+
+## Commands
+
+```bash
+cargo test --workspace --locked
+cargo clippy --workspace --all-targets --locked -- -D warnings
+cargo fmt --all -- --check
+cargo run -p runtime -- check devices/community/papouch-th2e.yaml
+cargo run -p runtime -- --file devices/builtin/generic-tnh-sensor.yaml
+```
+
+CI is those four (fmt, clippy, test, `simbus check` on every `devices/**/*.yaml`).
+Do not add a Rust test per device YAML.
+
+## Spec-first
+
+| Change | Write first |
+| --- | --- |
+| YAML language / new protocol syntax | `docs/spec.md` + `crates/spec` |
+| Process, CLI, signals, Docker | `docs/runtime.md` + `crates/runtime` |
+| HTTP routes | `docs/control.md` + `crates/control` |
+| Tick / behaviors / faults | `docs/simulation.md` + `crates/engine` |
+| Modbus PDU / exceptions | `docs/modbus.md` + `crates/modbus` |
+| Community map only | YAML + `simbus check` (no crate change) |
+| Agent/docs surfaces | `docs/`, `AGENTS.md`, `llms.txt`, skill — see above |
+
+When a contract and the Rust types disagree, the contract wins — change them
+together. New code, comments, and docs are English.
+
+## Architecture constraints
+
+- `spec`: no tokio, no sockets.
+- `engine`: no sockets, no SSE, no process health logs. `tick(dt)` only.
+- `modbus`: field plane. Follow industry Modbus (V1.1b3 / V1.0b), not invented policy.
+- `control`: session HTTP. Must not enlarge the register map.
+- `runtime`: one binary, file-only boot (`--file` / `SIMBUS_YAML_PATH`, else
+  `devices/builtin/default.yaml` or embedded). `simbus check` needs an explicit path.
+- Official maps: `devices/builtin/`. Contributor maps: `devices/community/` (PR).
+- Scenarios live **in** the device YAML (`scenarios:`), kebab-case `id`.
+- `type:` is identity inside the document, not a CLI flag.
+- Unimplemented protocol **syntax** is valid (`check` notes it). Boot refuses.
+
+## Deferred
+
+`docs/debt.md`: pause, `POST /scenarios` upload, serving extra protocols
+(spec §4). Do not restore Python.
+
+## Commits
+
+Do not commit unless the user asks. Do not force-push. Do not skip hooks.
+
+## Release
+
+Crate / binary version is **not** YAML `spec_version` (language) and **not**
+a device file's `version:` (map). Those stay unless the language or that map
+actually changes.
+
+### Version locations (keep them identical)
+
+Bump **all** of these together. Search the tree for the old `x.y.z` after.
+
+| Place | What |
+| --- | --- |
+| `Cargo.toml` `[workspace.package] version` | Source of truth (`simbus --version`, crate versions) |
+| `Cargo.toml` `[workspace.dependencies]` `spec` / `engine` / `control` / `modbus` `version` | Must match workspace |
+| `Cargo.lock` | Regenerated by `cargo test --workspace` (do not edit by hand) |
+| `CHANGELOG.md` | See steps below |
+| `AGENTS.md` (this file) | “Version in this tree” |
+| `README.md` roadmap | The “this tree” / current series line, if it names `v0.x` |
+
+Do **not** bump crate version in: `docs/spec.md` `spec_version`, device YAML
+`version:`, `rust-version`, edition.
+
+### During development (every PR that ships user-visible work)
+
+Append to `CHANGELOG.md` **`## [Unreleased]`** (Added / Changed / Fixed /
+Removed). Keep that section truthful. Do not put Unreleased notes under an
+old `## [x.y.z]` heading.
+
+### Cut a release `x.y.z`
+
+This product ships as the `simbus` binary and the GHCR image. Do **not**
+`cargo publish` the workspace crates.
+
+Do this on **`main`**, CI green (`fmt`, clippy, `cargo test --workspace --locked`,
+`simbus check` on `devices/`). `.github/workflows/docker-publish.yml` builds
+on tag `v*` only when GitHub associates the tag with **`main`**
+(`github.event.base_ref == 'refs/heads/main'`). Tag the tip of `origin/main`,
+not `develop` or a feature branch.
+
+1. Confirm Unreleased is complete and matches HEAD.
+2. Set every row in “Version locations” to `x.y.z`.
+3. In `CHANGELOG.md`: rename `## [Unreleased]` to `## [x.y.z] — YYYY-MM-DD`
+   (UTC date of the tag). Insert a new empty `## [Unreleased]` **above** it.
+   If the file has Keep a Changelog compare links at the bottom, point
+   `[Unreleased]` at `vX.Y.Z...HEAD` and add `[x.y.z]`.
+4. `cargo test --workspace --locked` (refreshes `Cargo.lock` if needed).
+5. Commit on `main` (message like `release: vX.Y.Z`). Push `main`.
+6. Annotated tag from that commit, then push the tag:
+
+   ```bash
+   git tag -a vX.Y.Z -m "simbus vX.Y.Z"
+   git push origin vX.Y.Z
+   ```
+
+   Tag shape is `v` + semver (`v0.3.0`). That triggers
+   `.github/workflows/docker-publish.yml` → GHCR
+   `ghcr.io/obsidia-systems/simbus:X.Y.Z`, `:X.Y`, `:latest`, `:sha-…`.
+7. GitHub Release from the same tag; body = that CHANGELOG section
+   (`gh release create vX.Y.Z --notes-file …` or the GitHub UI).
+8. **Next commit on `main`:** bump workspace + `AGENTS.md` to the **next**
+   version you will work toward (e.g. `0.3.0` tagged → tree becomes `0.3.1`
+   or `0.4.0`), so HEAD is never a lie about an already-published tag.
+
+Do not retag. Do not tag from `develop` or a feature branch (the image job
+will skip or refuse). Do not skip hooks. Do not `--force` the tag.
+
+Ask the user before committing, tagging, or pushing.
+

@@ -73,6 +73,19 @@ flowchart TB
 | `control` | Session HTTP + SSE | Modbus listen |
 | `runtime` | CLI, boot, three tasks, signals | A second YAML dialect |
 
+CI is `cargo test --workspace --locked`. Per crate (no Markdown next to the
+crate; contracts are in this folder):
+
+| Crate | Command | Tests |
+| --- | --- | --- |
+| `spec` | `cargo test -p spec` | `src/types.rs`; `tests/catalog.rs` (schema fixtures, not every YAML) |
+| `engine` | `cargo test -p engine` | `src/behaviors.rs`, `src/encode.rs`; `tests/engine.rs` |
+| `control` | `cargo test -p control` | `tests/http.rs` (probes, PATCH, faults, scenarios, API key, SSE) |
+| `modbus` | `cargo test -p modbus --locked` | FC1–FC4 / 5 / 6 / 15 / 16 and exceptions 02 / 03 |
+| `runtime` | `cargo test -p runtime --locked` | clap (`--file`, `--tick`, `--time-scale`, `--seed`, `check`, `ctl`); default template |
+
+Device YAML is validated with `simbus check`, not a Rust test per file.
+
 On disk this is the whole product (no Python package, no `scenarios/` folder):
 
 ```text

@@ -1,0 +1,32 @@
+# simbus
+
+> Industrial field-device simulator: one process, one YAML, Modbus TCP plus HTTP control.
+
+This file is a **documentation map** for agents (same role as `/llms.txt` on a docs site). For how to **change this codebase**, read [AGENTS.md](AGENTS.md). For **authoring a device YAML**, use the project skill [simbus-device](.agents/skills/simbus-device/SKILL.md) (`npx skills add obsidia-systems/simbus@simbus-device`).
+
+Human front door: [README.md](README.md). Contracts live in `docs/` and win over Rust types when they disagree.
+
+## Contracts
+
+- [docs/spec.md](docs/spec.md): Device YAML language (boot contract). Start here for new fields or protocols.
+- [docs/runtime.md](docs/runtime.md): Binary, boot, CLI/env, signals, Docker, time scale, drain.
+- [docs/modbus.md](docs/modbus.md): Field plane — Modbus TCP PDU (V1.1b3 / V1.0b).
+- [docs/control.md](docs/control.md): Session HTTP (not the field protocol). OpenAPI at `GET /docs` on a running process.
+- [docs/simulation.md](docs/simulation.md): Tick, `state.base`, behaviors, faults, encode.
+- [docs/scenarios.md](docs/scenarios.md): How to run scenarios bundled in the device YAML.
+- [docs/architecture.md](docs/architecture.md): Process shape, crates, repo layout.
+- [docs/debt.md](docs/debt.md): Specified as not this version (pause, scenario upload, extra protocols).
+- [docs/README.md](docs/README.md): Diátaxis index.
+
+## Device maps
+
+Where files go (builtin vs community): [docs/spec.md](docs/spec.md) (maps table).
+- [devices/builtin/](devices/builtin/): `default.yaml` plus product-shaped templates (T&H, UPS, PDU, CRAC, power meter, leak, door).
+- [devices/community/](devices/community/): Contributor maps (example: Papouch TH2E).
+
+Validate any map with `simbus check <file>` (or `cargo run -p runtime -- check <file>`).
+
+## Optional
+
+- [index.html](index.html): Marketing landing, not a contract.
+- [CHANGELOG.md](CHANGELOG.md): Release notes (`## [Unreleased]` during development). How to cut a tag, bump versions, and publish GHCR: [AGENTS.md](AGENTS.md) § Release.

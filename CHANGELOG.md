@@ -26,6 +26,9 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - `--time-scale` / `SIMBUS_TIME_SCALE` — simulation seconds per wall second.
   `dt = tick_interval × time_scale`. Default `1` is 1:1.
 - `simulation tick health` logs when `SIMBUS_TICK_HEALTH_LOG_INTERVAL` is > 0.
+- `AGENTS.md` (how to change this repo), `llms.txt` (documentation map), and
+  the Agent Skill `.agents/skills/simbus-device/` for writing device YAML
+  (`npx skills add obsidia-systems/simbus@simbus-device`).
 
 ### Changed
 
@@ -54,7 +57,9 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   does not filter on MBAP unit id (`0xFF` / `0` are valid per V1.0b).
 - Documentation map (`docs/README.md`) and architecture explanation
   (`docs/architecture.md`) with GitHub-safe Mermaid (flowchart, sequence,
-  state). README is the front door; contracts stay in `docs/`.
+  state). README is the front door; contracts stay in `docs/`. Crate tests
+  and the device-map table live in those pages; there are no crate or
+  `devices/` README files.
 - Tracing events from the Rust process: `simbus started` / `simbus stopping`,
   `api listening`, `modbus server listening`, `fault injected` / `expired` /
   `cleared`, `simulation reset`, `simulation base changed`, `alarm activated` /

@@ -7,7 +7,6 @@ license.workspace = true
 repository.workspace = true
 authors.workspace = true
 description = "HTTP control plane for a single simbus device"
-readme = "README.md"
 
 [lints]
 workspace = true

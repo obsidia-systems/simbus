@@ -7,7 +7,6 @@ license.workspace = true
 repository.workspace = true
 authors.workspace = true
 description = "simbus device runtime — one process, one device"
-readme = "README.md"
 
 [[bin]]
 name = "simbus"

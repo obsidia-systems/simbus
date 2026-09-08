@@ -7,7 +7,6 @@ license.workspace = true
 repository.workspace = true
 authors.workspace = true
 description = "Protocol-agnostic device simulation engine"
-readme = "README.md"
 
 [lints]
 workspace = true

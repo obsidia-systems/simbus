@@ -7,7 +7,6 @@ license.workspace = true
 repository.workspace = true
 authors.workspace = true
 description = "Modbus TCP slave for simbus"
-readme = "README.md"
 
 [lints]
 workspace = true

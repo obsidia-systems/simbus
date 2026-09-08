@@ -99,14 +99,25 @@ boots `devices/builtin/default.yaml` (or the copy embedded in the binary).
 There is no CLI `--type` selector. The YAML field `type:` remains identity
 inside the document (`tnh_sensor`, `ups`, `example`).
 
-Official templates live in `devices/builtin/` (including `default.yaml`).
-Named products belong in `devices/community/` and are accepted by pull request.
-Point the process at a template:
+Maps live next to the binary contract, not in crate folders:
+
+| Path | Who | What belongs |
+| --- | --- | --- |
+| `devices/builtin/default.yaml` | Obsidia | Zero-arg default: example channels, not a product |
+| `devices/builtin/` | Obsidia | Product-shaped templates (T&H, UPS, PDU, CRAC, …) |
+| `devices/community/` | Contributors (PR) | Named products, real register maps, lab-specific YAML |
+
+Point the process at a file:
 
 ```bash
 simbus --file devices/builtin/generic-ups.yaml
 simbus --file devices/community/papouch-th2e.yaml
+simbus check devices/community/my-device.yaml
 ```
+
+A community map is a YAML plus a pull request. Do not add a Rust test per
+file; CI already runs `simbus check` on `devices/**/*.yaml`. Agent playbook:
+`.agents/skills/simbus-device/SKILL.md`.
 
 ---
 

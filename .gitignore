@@ -7,4 +7,5 @@ Cargo.lock.bak
 .vscode/
 .idea/
 .claude/
+.cursor/
 .DS_Store

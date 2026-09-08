@@ -7,7 +7,6 @@ license.workspace = true
 repository.workspace = true
 authors.workspace = true
 description = "YAML device and scenario specifications for simbus"
-readme = "README.md"
 
 [lints]
 workspace = true

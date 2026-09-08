@@ -105,7 +105,8 @@ cargo run -p runtime -- --file devices/builtin/generic-tnh-sensor.yaml --port 50
 ```
 
 > [!NOTE]
-> **Requirements:** Rust 1.85+ (edition 2024), Docker (optional)
+> **Requirements:** Rust 1.85+ (MSRV; edition 2024). Toolchain file tracks
+> `stable` — Rust has no official LTS. Docker optional.
 
 ---
 
@@ -726,18 +727,30 @@ simbus/
 ├── rustfmt.toml
 ├── deny.toml
 ├── LICENSE
+├── .agents/skills/         Agent Skills (`simbus-device` YAML playbook)
+├── AGENTS.md               how to change this repo (coding agents)
+├── llms.txt                documentation map for agents
 ├── index.html              marketing landing (not a contract)
 └── README.md
 ```
 
 There is no `scenarios/` folder and no Python tree. Bundled scenarios live in
-each device YAML (`scenarios:`). Each crate documents its tests in its own
-`README.md`. Run them with `cargo test -p spec` (or `engine`, `control`,
-`modbus`, `runtime`).
+each device YAML (`scenarios:`). Crate tests: [docs/architecture.md](docs/architecture.md)
+§2. Run them with `cargo test -p spec` (or `engine`, `control`, `modbus`,
+`runtime`).
 
 ### Documentation
 
 Map and Diátaxis roles: **[docs/README.md](docs/README.md)**.
+
+Agents: **[AGENTS.md](AGENTS.md)** (work on this codebase), **[llms.txt](llms.txt)**
+(docs map), **[simbus-device skill](.agents/skills/simbus-device/SKILL.md)**
+(write a device YAML). In a clone the skill is already there. In another
+project:
+
+```bash
+npx skills add obsidia-systems/simbus@simbus-device
+```
 
 - [docs/architecture.md](docs/architecture.md) — How the process is shaped (diagrams).
 - [docs/spec.md](docs/spec.md) — Device YAML language (boot contract).
