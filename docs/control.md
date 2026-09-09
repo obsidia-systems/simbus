@@ -277,7 +277,7 @@ and POST it as JSON.
 
 | Flag | Env | Default |
 | --- | --- | --- |
-| `--url` | `SIMBUS_CTL_URL` | `http://127.0.0.1:8000` |
+| `--url` | `SIMBUS_CTL_URL` | `http://127.0.0.1:` + `SIMBUS_API_PORT` (else `8000`) |
 | `--api-key` | `SIMBUS_API_KEY` | — |
 
 Writes send `x-api-key` when `--api-key` is set (same header as a GUI).

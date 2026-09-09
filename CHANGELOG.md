@@ -73,6 +73,20 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Changed
 
+- Compose services drop every capability except `NET_BIND_SERVICE`, run
+  UID 65532 on a read-only rootfs with `no-new-privileges`, `init`, a
+  128 MiB / 1 CPU / 64-pid ceiling, and json-file logs capped at 10 MiB × 3.
+- Docker image is ~25 MB instead of ~146 MB (~9 MB to pull instead of ~46 MB).
+  The binary is now a static musl build on `gcr.io/distroless/static-debian12`,
+  so the runtime stage drops Debian, `ca-certificates` and `curl`; the
+  `HEALTHCHECK` is `simbus ctl healthz` in exec form. That image has **no
+  shell** — `docker exec … sh` no longer works. The build also repacks the
+  Swagger UI zip without source maps and duplicate ES bundles, which
+  `utoipa-swagger-ui` would otherwise embed verbatim (~10 MB of `.rodata`);
+  `/docs` still serves the full UI offline.
+- `simbus ctl` defaults `--url` to the loopback `SIMBUS_API_PORT` rather than a
+  hardcoded `8000`, so an API port override still reaches the local process.
+  `SIMBUS_CTL_URL` still wins when set.
 - Every map under `devices/` is language 2 (`points:` + Modbus `export`).
   The seven product templates were rewritten against the point sets their
   industries actually publish, and the point ids, units, spaces, and data

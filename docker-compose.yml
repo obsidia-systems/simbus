@@ -29,8 +29,26 @@ x-simbus-defaults: &simbus-defaults
     dockerfile: Dockerfile
     target: runtime
   restart: unless-stopped
+  user: "65532:65532"
+  read_only: true
+  cap_drop:
+    - ALL
   cap_add:
-    - NET_BIND_SERVICE
+    - NET_BIND_SERVICE   # YAML field ports 502 / 512 are privileged
+  security_opt:
+    - no-new-privileges:true
+  pids_limit: 64
+  init: true
+  logging:
+    driver: json-file
+    options:
+      max-size: "10m"
+      max-file: "3"
+  deploy:
+    resources:
+      limits:
+        memory: 128M
+        cpus: "1.0"
   networks:
     - simbus
 

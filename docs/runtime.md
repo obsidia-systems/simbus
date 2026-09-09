@@ -258,7 +258,22 @@ Compose maps host ports and **MUST** set `SIMBUS_YAML_PATH` to the template
 for that service. Inside the container Modbus is the YAML port (default
 `502` for most templates, `512` for Papouch).
 
-Healthcheck: `GET /healthz` on `SIMBUS_API_PORT`.
+The runtime stage is `gcr.io/distroless/static-debian12:nonroot`: the binary
+is a static musl build, so the image carries no libc, no package manager and
+**no shell**. `docker exec … sh` does not work; debug against the `:debug`
+distroless variant instead.
+
+Healthcheck: `GET /healthz` on `SIMBUS_API_PORT`, issued by
+`simbus ctl healthz` (an exec-form `HEALTHCHECK`, since there is no shell to
+expand the port).
+
+Compose (`docker-compose.yml`) applies the same hardening to every service:
+UID 65532, `read_only` rootfs, `cap_drop: ALL` then `NET_BIND_SERVICE` only
+(YAML field ports 502 / 512 are privileged), `no-new-privileges`, `init`,
+a 64-pid / 128 MiB / 1 CPU ceiling, and json-file logs capped at 10 MiB × 3.
+Published ports stay on all host interfaces so a PLC or SCADA on the LAN can
+reach Modbus; bind the API to `127.0.0.1` in an override file if the control
+plane must not leave the host.
 
 Every Compose service has a profile. Bare `docker compose up` starts
 nothing; use `--profile all` (7 builtin + 4 Papouch) or name services.

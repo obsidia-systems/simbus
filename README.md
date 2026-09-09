@@ -730,7 +730,7 @@ All settings use the `SIMBUS_` prefix and can be set via environment variables o
 | `SIMBUS_DEVICE_NAME` | — | Override the device name from YAML |
 | `SIMBUS_API_KEY` | — | If set, write endpoints require `x-api-key` or `Bearer` |
 | `SIMBUS_CORS_ORIGINS` | `*` | Comma-separated CORS origins (`*` for development) |
-| `SIMBUS_CTL_URL` | `http://127.0.0.1:8000` | Base URL for `simbus ctl` |
+| `SIMBUS_CTL_URL` | `http://127.0.0.1:` + `SIMBUS_API_PORT` | Base URL for `simbus ctl` |
 
 **`.env` example:**
 
@@ -776,7 +776,12 @@ A tag `v*` on `main` builds them. Until the first tag of this tree, build locall
 docker build -t simbus:latest .
 
 docker run -d \
-  --cap-add NET_BIND_SERVICE \
+  --user 65532:65532 \
+  --read-only \
+  --cap-drop ALL --cap-add NET_BIND_SERVICE \
+  --security-opt no-new-privileges \
+  --init \
+  --pids-limit 64 --memory 128m --cpus 1 \
   -e SIMBUS_YAML_PATH=/app/devices/builtin/generic-tnh-sensor.yaml \
   -p 5020:502 -p 8000:8000 \
   --name simbus-tnh \
@@ -798,9 +803,13 @@ Every Compose service has a profile. `docker compose up` with no service names
 and no `--profile` starts **nothing**. Naming a service (`up tnh-sensor`) starts
 it even without enabling its profile.
 
-The image is a two-stage build (`rust:1-bookworm` compile + `debian:bookworm-slim` runtime),
-runs as a non-root user, and health-checks `GET /healthz`. The entrypoint is the `simbus`
-binary so Docker behavior matches local runs.
+The image is a two-stage build (`rust:1-alpine` compile + `gcr.io/distroless/static-debian12`
+runtime), runs as UID 65532, and health-checks `GET /healthz` through `simbus ctl`.
+The entrypoint is the `simbus` binary so Docker behavior matches local runs. It weighs
+about 25 MB (9 MB to pull): the binary is statically linked against musl, so the runtime
+stage ships no libc, no package manager and **no shell** — `docker exec … sh` will fail.
+Compose also drops every capability except `NET_BIND_SERVICE`, mounts a read-only
+rootfs, sets `no-new-privileges`, and caps CPU / memory / pids / logs.
 
 Generic built-in devices listen on Modbus TCP port `502` inside the container and
 on API port `8000`. `docker-compose.yml` maps them to unique host ports (`5020`,

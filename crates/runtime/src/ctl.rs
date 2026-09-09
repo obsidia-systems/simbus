@@ -5,10 +5,20 @@ use clap::{Args, Subcommand};
 use reqwest::Method;
 use serde_json::{Value, json};
 
+/// Loopback control plane, following the same `SIMBUS_API_PORT` the served
+/// process reads. The container healthcheck has no shell to expand it.
+fn loopback_url() -> String {
+    let port = std::env::var("SIMBUS_API_PORT")
+        .ok()
+        .and_then(|value| value.parse::<u16>().ok())
+        .unwrap_or(8000);
+    format!("http://127.0.0.1:{port}")
+}
+
 #[derive(Args, Debug)]
 pub struct CtlArgs {
     /// Base URL of the control plane
-    #[arg(long, env = "SIMBUS_CTL_URL", default_value = "http://127.0.0.1:8000")]
+    #[arg(long, env = "SIMBUS_CTL_URL", default_value_t = loopback_url())]
     url: String,
     /// API key for write endpoints (`x-api-key`)
     #[arg(long, env = "SIMBUS_API_KEY")]
