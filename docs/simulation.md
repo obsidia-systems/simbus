@@ -1,897 +1,549 @@
-# Simulation Engine — Reference Guide
+# Simulation Engine
 
-This document covers the simulation engine in full: how the tick loop works, every
-behavior type and its parameters, the drift modifier, alarm triggers, and fault injection.
-Practical recipes are included throughout.
+**Status:** normative for `crates/engine` (language versions 1 and 2)  
+**Device language:** [spec.md](spec.md)  
+**Process:** [runtime.md](runtime.md)  
+**HTTP session:** [control.md](control.md)  
+**Field plane:** [modbus.md](modbus.md) · [opcua.md](opcua.md) · [bacnet.md](bacnet.md)  
+**Shape of the process:** [architecture.md](architecture.md)
 
----
+This document is the contract of **the tick**: time, `state.base`, behaviors,
+triggers, faults, encode, and reset. It does not define YAML syntax or HTTP
+verbs.
 
-## Table of Contents
-
-- [How the Engine Works](#how-the-engine-works)
-- [Operating Point — state.base](#operating-point--statebase)
-- [Behaviors](#behaviors)
-  - [constant](#constant)
-  - [gaussian\_noise](#gaussian_noise)
-  - [sinusoidal](#sinusoidal)
-  - [drift](#drift)
-  - [sawtooth](#sawtooth)
-  - [step](#step)
-- [Drift Modifier](#drift-modifier)
-- [Alarm Triggers](#alarm-triggers)
-- [Fault Injection](#fault-injection)
-  - [spike](#spike)
-  - [freeze](#freeze)
-  - [dropout](#dropout)
-  - [noise\_amplify](#noise_amplify)
-  - [alarm](#alarm)
-- [Practical Recipes](#practical-recipes)
+The crate MUST NOT open sockets, publish SSE, or emit process health logs.
+`Device::tick(dt)` returns a `Snapshot`. The runtime publishes that snapshot
+on a `watch` channel; the control plane streams it ([control.md](control.md)).
 
 ---
 
-## How the Engine Works
+## 1. Role
 
-The `SimulationEngine` runs as a single asyncio Task. On every **tick** it:
+The engine owns one in-memory register bank for one loaded document.
 
-1. Decrements fault timers and removes expired faults.
-2. Iterates every holding and input register with a `simulation` block.
-3. Advances the register's elapsed simulation time by `tick_interval` seconds.
-4. Calls the behavior function to compute a new real-world value from `state.base`.
-5. Applies any active fault that targets this register (holding only — input registers
-   are read-only to Modbus clients and are not affected by faults).
-6. Scales the real-world value to a raw integer (`raw = real × scale`) and writes it
-   to the `RegisterStore`.
-7. Evaluates all coil and discrete-input triggers against current register values.
-8. Publishes a JSON snapshot to every active SSE subscriber.
+On every **tick** with `dt > 0` it MUST:
 
-```text
-tick
- ├─ tick_faults(dt)           — expire TTL faults
- ├─ _tick_registers(holding)  — compute + fault + write to holding store
- ├─ _tick_registers(input)    — compute + write to input store (no faults)
- └─ _evaluate_alarms()        — update coils and discrete inputs
+1. Decrement fault timers by `dt` and drop faults with `remaining_s <= 0`.
+2. Advance `elapsed_s` by `dt` for every holding and input register.
+3. For each holding and input register that has a `simulation:` block:
+   compute a real-world value from `state.base`, apply any matching fault,
+   encode, write the cell.
+4. Evaluate coil and discrete triggers against current real values.
+5. Return a snapshot of the bank.
+
+`dt <= 0` MUST be a no-op (same snapshot, no time, no expiry).
+`is_running == false` (pause) MUST be the same no-op even when `dt > 0`.
+Resume continues from the frozen `elapsed_s` and fault `remaining_s`.
+
+Registers without `simulation:` are static: they keep `default` or whatever
+was last written. The engine MUST NOT overwrite them on tick.
+
+Pause is set from the control plane ([control.md](control.md)). The engine
+MUST consult `is_running` inside `tick`. The runtime MUST NOT publish an
+SSE tick frame for a skipped (paused) wait.
+
+```mermaid
+flowchart TB
+    tick[tick dt] --> paused{is_running and dt greater than 0?}
+    paused -->|no| snap[Return snapshot]
+    paused -->|yes| faults[Decrement fault TTLs]
+    faults --> regs[For each holding and input]
+    regs --> beh{has simulation?}
+    beh -->|no| skip[Keep last written]
+    beh -->|yes| compute[Compute from state.base]
+    compute --> flt{matching fault?}
+    flt -->|yes| over[Override]
+    flt -->|no| enc[Encode and write cell]
+    over --> enc
+    skip --> trig
+    enc --> trig[Evaluate triggers]
+    trig --> snap
 ```
 
-### Cooperative safety — no locks
+---
 
-asyncio is single-threaded and cooperative. Because neither `_tick()` nor
-`RegisterStore.get/set` ever `await`, they execute atomically relative to all other
-coroutines (FastAPI handlers, Modbus DataBlock callbacks). No `asyncio.Lock` is needed.
+## 2. Time
 
-### Tick interval
+`dt` is **simulation seconds**. The runtime sleeps `tick_interval` (wall
+seconds) and passes `dt = tick_interval × time_scale`
+([runtime.md](runtime.md) §4). Default `time_scale` is `1` (1:1).
 
-`tick_interval` (seconds) controls both the real-time pace and the simulation time step.
-The engine reads `self.tick_interval` on **every iteration**, so it can be updated live:
+`--tick` / `PATCH /simulation` is the sample period. A 12-hour sine still
+takes 12 simulation hours. With `--time-scale 60` those 12 simulation hours
+elapse in 12 wall minutes. The engine MUST NOT store a second clock;
+only the `dt` the caller passes matters.
 
-```bash
-# Slow down to one tick every 5 seconds
-curl -X PATCH http://localhost:8000/simulation \
-  -H "Content-Type: application/json" \
-  -d '{"tick_interval": 5.0}'
-
-# Speed up to 10 ticks per second
-curl -X PATCH http://localhost:8000/simulation \
-  -d '{"tick_interval": 0.1}'
-```
-
-For **time acceleration** — simulating hours of device behavior in seconds — set
-`SIMBUS_TICK_INTERVAL=60.0`. Each real second advances the simulation by 60 seconds,
-making a 12-hour sinusoidal cycle complete in 12 real minutes.
+Periodic behaviors (`sinusoidal`, `square`, `sawtooth`, `triangle`,
+`cycle`, `step`) and fault TTLs use elapsed simulation time. Drift uses
+**engineering units per simulation second**, applied as `rate × dt`.
+Changing `--tick` MUST NOT change the physical trajectory, only how often
+it is sampled. Changing `--time-scale` MUST (same trajectory, faster or
+slower wall time).
 
 ---
 
-## Operating Point — state.base
+## 3. Operating point — `state.base`
 
-Every register has a mutable `state.base` value initialized from `default` in the YAML.
-All behaviors use `state.base` as their center or starting point.
+Every numeric register has `state.base`, initialized from YAML `default`
+(then jittered — §6).
 
-When you `PATCH /registers/{address}`, the engine calls `update_base()`, which converts
-the raw integer back to a real-world value (`raw / scale`) and stores it as the new
-`state.base`. On the next tick, the behavior runs from the new operating point — it
-doesn't snap back to the YAML default.
+Behaviors that **use** `state.base` as center or drift state: `constant`,
+`gaussian_noise`, `sinusoidal`, `square`, `drift`. A PATCH shifts the
+operating point and the next tick follows it.
 
-```text
-YAML default: temperature = 22.5°C  →  state.base = 22.5
-gaussian_noise oscillates around 22.5°C
+Behaviors that **own** the live value (YAML range, list, or schedule):
+`sawtooth`, `triangle`, `uniform`, `cycle`, `step`. `PATCH` / FC6 still
+call `update_base`; the value is visible until the next tick, then
+overwritten from the waveform, draw, or schedule (§5).
 
-PATCH /registers/0 {"value": 270}   →  raw 270 / scale 10 = 27.0°C
-state.base = 27.0
-gaussian_noise now oscillates around 27.0°C — takes effect next tick
-```
+`PATCH /registers/…`, `PATCH /points/{id}`, and Modbus FC6/FC16 MUST call `update_base` for **each**
+cell whose words changed: decode `raw / scale` (or the provided `real_value`)
+into `state.base`. For behaviors that use `state.base`, the next tick runs
+from that point. It MUST NOT snap back to YAML `default`. FC16 of two
+adjacent `uint16` cells MUST update both bases. FC6 of one word of a
+`float32`/`uint32` pair splices that word into the cell, then updates that
+one base ([modbus.md](modbus.md) §3.2).
 
-This is the correct way to simulate an operator adjusting a setpoint, changing a
-load condition, or positioning a test at a known operating point before injecting a fault.
+---
+
+## 4. Tick interval live update
+
+The engine stores `tick_interval`. `set_tick_interval` MUST take effect on
+the next wait in the runtime loop. `tick(dt)` uses the `dt` the caller
+passes, not a cached copy from construction.
 
 ---
 
-## Behaviors
+## 5. Behaviors
 
-Behaviors are declared under `simulation:` in the register block. Each behavior is
-identified by the `behavior:` key, which selects the Pydantic model and the
-computation function.
+Syntax: [spec.md](spec.md) §6. Computation below. `t` is
+`elapsed_s + phase_s` (§6).
 
-Registers without a `simulation:` block are static — they hold their default value
-(or whatever value was written by a PATCH) and are never updated by the engine.
-
----
+Each behavior below carries a plot of its own formula, so an integrator can
+see the shape before booting anything. The parameters are the ones a shipped
+map under `devices/` actually uses where one exists. Plots of the
+deterministic behaviors (`sinusoidal`, `square`, `drift`, `sawtooth`,
+`triangle`, `step`, `cycle`) are exact: the formula evaluated at evenly
+spaced samples, with `phase_s = 0`. Plots of the two random behaviors
+(`gaussian_noise`, `uniform`) show one draw of the right **distribution** —
+the engine's RNG stream is seeded per device (§6), so your values differ.
 
 ### constant
 
-Returns `state.base` unchanged every tick. The value never drifts or adds noise.
-Useful for setpoints, configuration registers, or any value that should only change
-when explicitly written.
+`value = state.base`
 
-```yaml
-- address: 5
-  name: setpoint
-  unit: "°C"
-  default: 18.0
-  scale: 10
-  simulation:
-    behavior: constant
+Flat. It is not "no simulation": the cell is rewritten every tick, so a
+`PATCH` or an FC6 that moves `state.base` moves the line, and a fault still
+overrides it. A register with no `simulation:` block at all is the static
+case (§1).
+
+### gaussian_noise
+
+If a drift modifier is present and `enabled`, apply it first (§5.1).
+Then sample Normal(`state.base`, `std_dev`).
+
+Generic T&H `temperature`: `state.base` 22.5 °C, `std_dev` 0.3, sampled
+every second. The flat line is `state.base` itself — the noise straddles it
+and never walks away from it, which is what separates this from `drift`.
+
+```mermaid
+%%{init: {"themeVariables": {"xyChart": {"plotColorPalette": "#2e86de, #e67e22"}}}}%%
+xychart-beta
+    title "gaussian_noise std_dev 0.3: samples straddle the flat state.base"
+    x-axis "simulation seconds" 0 --> 23
+    y-axis "°C" 21.5 --> 23.5
+    line [22.42, 22.65, 22.43, 22.41, 22.22, 22.44, 22.83, 22.63, 22.81, 22.57, 22.62, 22.56, 22, 22.76, 22.65, 22.65, 21.99, 21.98, 22.23, 22.36, 22.59, 22.49, 22.66, 22.31]
+    line [22.5, 22.5, 22.5, 22.5, 22.5, 22.5, 22.5, 22.5, 22.5, 22.5, 22.5, 22.5, 22.5, 22.5, 22.5, 22.5, 22.5, 22.5, 22.5, 22.5, 22.5, 22.5, 22.5, 22.5]
 ```
-
-**Parameters:** none.
-
-**Use cases:**
-
-- Setpoint registers that operators write to
-- Mode or status registers that change only on command
-- Reference values in multi-register devices
-
----
-
-### gaussian\_noise
-
-Adds normally distributed (Gaussian) noise to `state.base` on every tick. The
-output oscillates around the base value — most samples fall within ±1 std\_dev,
-~95% within ±2 std\_dev.
-
-```yaml
-- address: 0
-  name: temperature
-  unit: "°C"
-  default: 22.5
-  scale: 10
-  simulation:
-    behavior: gaussian_noise
-    std_dev: 0.3
-```
-
-| Parameter | Type | Required | Description |
-| --- | --- | --- | --- |
-| `std_dev` | float > 0 | yes | Standard deviation of the noise in real-world units |
-| `drift` | object | no | Optional drift modifier (see [Drift Modifier](#drift-modifier)) |
-
-**How to choose `std_dev`:**
-
-- Precision sensor (±0.1°C): `std_dev: 0.05`
-- Typical HVAC sensor (±0.5°C): `std_dev: 0.3`
-- Noisy current sensor (±2%): `std_dev: 1.0`
-- Intentionally unstable / degraded sensor: `std_dev: 5.0`
-
-**Use cases:**
-
-- Temperature, humidity, pressure, current, voltage sensors
-- Any value that should appear "live" without a defined pattern
-
-```yaml
-# Voltage with very tight noise — stable supply
-- address: 1
-  name: input_voltage
-  unit: "V"
-  default: 120.0
-  scale: 10
-  simulation:
-    behavior: gaussian_noise
-    std_dev: 0.2
-
-# Fan speed with more noise — mechanical vibration
-- address: 3
-  name: fan_speed
-  unit: "%"
-  default: 70.0
-  scale: 10
-  simulation:
-    behavior: gaussian_noise
-    std_dev: 1.5
-```
-
----
 
 ### sinusoidal
 
-Produces a sine wave oscillation around `state.base`. The value cycles between
-`base - amplitude` and `base + amplitude` over the configured period.
+```text
+value = state.base + amplitude × sin(2π × t / (period_hours × 3600))
+```
+
+Generic T&H `humidity`: base 45 %RH, `amplitude` 5, `period_hours` 12. Two
+full periods in a day — this is the behavior for a daily or shift cycle, not
+for lab-scale toggling.
+
+```mermaid
+xychart-beta
+    title "sinusoidal: amplitude 5, period_hours 12 (one sample per hour)"
+    x-axis "simulation hours" 0 --> 24
+    y-axis "%RH" 38 --> 52
+    line [45, 47.5, 49.33, 50, 49.33, 47.5, 45, 42.5, 40.67, 40, 40.67, 42.5, 45, 47.5, 49.33, 50, 49.33, 47.5, 45, 42.5, 40.67, 40, 40.67, 42.5, 45]
+```
+
+### square
+
+50% duty, analog high then low around `state.base`:
 
 ```text
-value = state.base + amplitude × sin(2π × elapsed_s / period_s)
+u = (t mod period_seconds) / period_seconds
+value = state.base + amplitude     if u < 0.5
+value = state.base − amplitude     otherwise
 ```
 
-```yaml
-- address: 1
-  name: humidity
-  unit: "%RH"
-  default: 45.0
-  scale: 10
-  simulation:
-    behavior: sinusoidal
-    period_hours: 12
-    amplitude: 5.0
+`period_seconds` is the full high+low cycle (lab-scale, unlike
+`sinusoidal`'s `period_hours`).
+
+Base 45, `amplitude` 5, `period_seconds` 60: the value only ever sits at
+`base + amplitude` or `base − amplitude`, never in between. That is what
+makes it the deadband / alarm-hysteresis behavior — every tick is on one
+side of a trigger threshold placed between the two levels.
+
+```mermaid
+xychart-beta
+    title "square: amplitude 5, period_seconds 60 (sampled every 5 s)"
+    x-axis "simulation seconds" 0 --> 120
+    y-axis "engineering value" 38 --> 52
+    line [50, 50, 50, 50, 50, 50, 40, 40, 40, 40, 40, 40, 50, 50, 50, 50, 50, 50, 40, 40, 40, 40, 40, 40, 50]
 ```
-
-| Parameter | Type | Required | Description |
-| --- | --- | --- | --- |
-| `period_hours` | float > 0 | yes | Full cycle duration in hours |
-| `amplitude` | float > 0 | yes | Peak deviation from center in real-world units |
-| `drift` | object | no | Optional drift modifier (see [Drift Modifier](#drift-modifier)) |
-
-**Examples:**
-
-```yaml
-# Daily temperature cycle — ±3°C over 24 hours
-simulation:
-  behavior: sinusoidal
-  period_hours: 24
-  amplitude: 3.0
-
-# Fast oscillation for testing — full cycle every 2 minutes (0.033 h)
-simulation:
-  behavior: sinusoidal
-  period_hours: 0.033
-  amplitude: 10.0
-
-# UPS load — peaks every 2 hours, ±10% around baseline
-simulation:
-  behavior: sinusoidal
-  period_hours: 2
-  amplitude: 10.0
-```
-
-**Time acceleration tip:**
-At `SIMBUS_TICK_INTERVAL=60.0`, each real second = one simulation minute.
-A `period_hours: 24` cycle completes in 24 real minutes instead of 24 hours.
-
-**Use cases:**
-
-- Daily temperature/humidity cycles in data centers or facilities
-- Periodic load patterns on UPS and PDUs
-- HVAC return air temperature variation
-- Any value with a known repeating period
-
----
 
 ### drift
 
-Moves `state.base` by a fixed `rate` each tick, clamped within `bounds`. When the
-value reaches a bound it stops (does not bounce back). To simulate discharge/charge
-cycles, inject a fault or use `PATCH /registers` to reposition the base.
-
-```yaml
-- address: 0
-  name: battery_soc
-  unit: "%"
-  default: 100.0
-  scale: 10
-  simulation:
-    behavior: drift
-    rate: -0.005      # negative = decreasing
-    bounds: [0.0, 100.0]
+```text
+state.base = clamp(state.base + rate × dt, bounds)
+value = state.base
 ```
 
-| Parameter | Type | Required | Description |
-| --- | --- | --- | --- |
-| `rate` | float | yes | Change per tick in real-world units. Negative = downward |
-| `bounds` | [float, float] | yes | `[min, max]` hard clamp. `bounds[0]` must be < `bounds[1]` |
+`rate` is engineering units **per simulation second**. At the default
+`tick_interval=1.0` this matches maps written against “per tick”. It does
+not bounce at a bound.
 
-**Rate sizing guide** (at default `tick_interval=1.0`):
+Generic T&H `temperature` drift modifier: base 22.5 °C, `rate` 0.01 °C/s,
+`bounds` `[18.0, 35.0]`. It reaches the upper bound at t ≈ 1250 s and then
+**stays** there — a drift channel is a one-way ramp that ends parked on a
+bound, not a triangle. Two consequences worth planning for: a counter (kWh,
+run hours) needs `bounds` wide enough for the whole test, and the same
+`bounds` span sets the boot jitter (§6), so a counter with an enormous span
+starts far from its `default`.
 
-| Goal | rate |
-| --- | --- |
-| 1% drop per minute | `-0.0167` (per second tick) |
-| 1% drop per 200 ticks | `-0.005` |
-| Temperature rises 1°C per hour | `+0.000278` |
-| Fast discharge for testing | `-0.5` |
-
-```yaml
-# Runtime counter — drains over ~100 minutes (6000 ticks at 1s)
-- address: 4
-  name: runtime_remaining
-  unit: "min"
-  default: 60.0
-  scale: 1
-  simulation:
-    behavior: drift
-    rate: -0.01
-    bounds: [0.0, 120.0]
-
-# Slow upward drift — aging sensor baseline creep
-- address: 2
-  name: co2_level
-  unit: "ppm"
-  default: 400.0
-  scale: 1
-  simulation:
-    behavior: drift
-    rate: 0.1
-    bounds: [350.0, 5000.0]
+```mermaid
+%%{init: {"themeVariables": {"xyChart": {"plotColorPalette": "#2e86de, #e67e22"}}}}%%
+xychart-beta
+    title "drift rate 0.01/s: the ramp parks on the flat upper bound (35)"
+    x-axis "simulation seconds" 0 --> 1800
+    y-axis "°C" 20 --> 37
+    line [22.5, 23.5, 24.5, 25.5, 26.5, 27.5, 28.5, 29.5, 30.5, 31.5, 32.5, 33.5, 34.5, 35, 35, 35, 35, 35, 35]
+    line [35, 35, 35, 35, 35, 35, 35, 35, 35, 35, 35, 35, 35, 35, 35, 35, 35, 35, 35]
 ```
-
-**Use cases:**
-
-- Battery state of charge / discharge
-- Runtime remaining counters
-- Slow sensor aging or baseline creep
-- Gradual temperature rise in an enclosure
-
----
 
 ### sawtooth
 
-Linearly ramps from `min` to `max` over `period_seconds`, then immediately resets to
-`min` and repeats. The shape is a rising ramp, not a triangle — there is no descending
-slope.
+```text
+value = min + (max − min) × (t mod period_seconds) / period_seconds
+```
+
+Rising ramp only. Resets to `min` at each period. Does not use
+`state.base`.
+
+### triangle
+
+Symmetric ramp `min → max → min` in one `period_seconds`:
 
 ```text
-value = min + (max - min) × (elapsed_s % period_s) / period_s
+u = (t mod period_seconds) / period_seconds
+value = min + (max − min) × (2u)           if u < 0.5
+value = max − (max − min) × (2u − 1)       otherwise
 ```
 
-```yaml
-- address: 3
-  name: compressor_cycle
-  unit: "%"
-  default: 0.0
-  scale: 10
-  simulation:
-    behavior: sawtooth
-    period_seconds: 300   # 5-minute cycle
-    min: 0.0
-    max: 100.0
+Does not use `state.base`. At `u = 0` the value is `min`; at `u = 0.5` it
+is `max`.
+
+Both plotted with `min` 0, `max` 100, `period_seconds` 60. They share a
+period and a range and differ only in the return path: `sawtooth` snaps from
+`max` back to `min` in a single tick (the vertical edge at 60 s and 120 s),
+`triangle` walks back down. Pick `sawtooth` when the discontinuity is the
+point — a rollover, a reset — and `triangle` when the ramp has to be
+continuous in both directions.
+
+```mermaid
+%%{init: {"themeVariables": {"xyChart": {"plotColorPalette": "#2e86de, #e67e22"}}}}%%
+xychart-beta
+    title "sawtooth snaps back vs triangle walks back, period_seconds 60"
+    x-axis "simulation seconds" 0 --> 120
+    y-axis "engineering value" 0 --> 100
+    line [0, 8.33, 16.67, 25, 33.33, 41.67, 50, 58.33, 66.67, 75, 83.33, 91.67, 0, 8.33, 16.67, 25, 33.33, 41.67, 50, 58.33, 66.67, 75, 83.33, 91.67, 0]
+    line [0, 16.67, 33.33, 50, 66.67, 83.33, 100, 83.33, 66.67, 50, 33.33, 16.67, 0, 16.67, 33.33, 50, 66.67, 83.33, 100, 83.33, 66.67, 50, 33.33, 16.67, 0]
 ```
 
-| Parameter | Type | Required | Description |
-| --- | --- | --- | --- |
-| `period_seconds` | float > 0 | yes | Full cycle duration in seconds |
-| `min` | float | yes | Starting (and reset) value |
-| `max` | float | yes | Peak value. Must be > `min` |
+### uniform
 
-**Use cases:**
+Each tick, sample Uniform(`min`, `max`) inclusive. Independent of
+`state.base`. Distinct from `gaussian_noise` (Normal around the operating
+point).
 
-- Compressor or pump cycle simulation
-- Load ramp tests — verify alarm response at specific thresholds
-- Coolant pressure cycles
-- Any repeating linear ramp pattern
+One draw per tick, `min` 0, `max` 100. There is no center and no memory:
+consecutive ticks are independent, so the series has no trajectory to
+follow. Bars rather than a line, because joining the samples would suggest a
+path between them that the behavior does not have.
 
-**Alarm ramp test example:**
-Set `min` below alarm threshold and `max` above it, then watch the coil fire and clear
-on each cycle without any manual intervention.
-
-```yaml
-# Temperature ramps through alarm threshold every 10 minutes
-simulation:
-  behavior: sawtooth
-  period_seconds: 600
-  min: 20.0    # below high_temp_alarm threshold of 30.0°C
-  max: 40.0    # above threshold
+```mermaid
+xychart-beta
+    title "uniform: 24 independent draws in [0, 100]"
+    x-axis "tick" 0 --> 23
+    y-axis "engineering value" 0 --> 100
+    bar [45.2, 56, 92.4, 46.6, 50.8, 58.7, 18.5, 51.2, 63, 79.3, 9.4, 30.3, 9.1, 81, 69.3, 4.2, 98.2, 96.5, 65.4, 61.6, 15.7, 1.5, 52.8, 6]
 ```
-
----
 
 ### step
 
-Holds a series of discrete values at scheduled simulation times. Stays at `default`
-until the first step threshold, then holds each step's value until the next one.
-The last step value is held indefinitely.
+Hold YAML `default` until the first `at`, then the last step with
+`at <= t`. Equal `at` values: last in the list wins. The last step is held
+indefinitely. PATCH does not change the schedule.
 
-```yaml
-- address: 1
-  name: battery_mode
-  default: 0.0
-  scale: 1
-  simulation:
-    behavior: step
-    steps:
-      - at: 0       # seconds from simulation start
-        value: 1.0  # online mode
-      - at: 300     # 5 minutes in
-        value: 2.0  # on-battery mode
-      - at: 600     # 10 minutes in
-        value: 3.0  # low-battery mode
-      - at: 900     # 15 minutes in
-        value: 0.0  # shutdown
+`default` 0 with `steps` at 60 → 30, 180 → 75, 300 → 40. The schedule is
+absolute on `elapsed_s` and it **ends**: after the last `at` the value is
+held forever, so this is the behavior for a commissioning profile that must
+finish somewhere, not for anything that should repeat.
+
+```mermaid
+xychart-beta
+    title "step: 0 until 60 s, then 30 -> 75 -> 40, last value held"
+    x-axis "simulation seconds" 0 --> 420
+    y-axis "engineering value" 0 --> 80
+    line [0, 0, 0, 30, 30, 30, 30, 30, 30, 75, 75, 75, 75, 75, 75, 40, 40, 40, 40, 40, 40, 40]
 ```
 
-| Parameter | Type | Required | Description |
-| --- | --- | --- | --- |
-| `steps` | list | yes | At least one entry. Each entry has `at` (seconds) and `value` |
-| `steps[].at` | float ≥ 0 | yes | Elapsed simulation seconds when this step becomes active |
-| `steps[].value` | float | yes | Real-world value to hold from this point on |
+### cycle
 
-Steps are evaluated in ascending `at` order. If multiple steps share the same `at`,
-the last one in the list wins.
+Walk YAML `values` in order, one index every `dwell_seconds` of simulation
+time, then repeat from the first:
 
-**Use cases:**
-
-- Mode registers that change during a test scenario
-- Simulating a device startup sequence
-- Discrete state machines (standby → active → fault → reset)
-- Pre-planned test sequences without needing the fault API
-
-**Combined step + alarm trigger:**
-
-```yaml
-registers:
-  holding:
-    - address: 0
-      name: load_kw
-      default: 0.0
-      scale: 100
-      simulation:
-        behavior: step
-        steps:
-          - at: 0      value: 10.0   # normal load
-          - at: 60     value: 45.0   # heavy load — stays under alarm threshold
-          - at: 120    value: 55.0   # overload — crosses threshold, fires alarm
-          - at: 180    value: 10.0   # recovers
-
-  coils:
-    - address: 0
-      name: overload_alarm
-      trigger:
-        source_register: load_kw
-        condition: gt
-        threshold: 50.0
+```text
+i = floor(t / dwell_seconds) mod len(values)
+value = values[i]
 ```
+
+Does not use `state.base`. Empty `values` is invalid (spec §6). Unlike
+`step`, there is no absolute `at` and the walk does not stop at the last
+entry.
+
+Generic door contact `open_seconds`: `dwell_seconds` 60, `values`
+`[0, 0, 0, 8, 0, 0, 14, 0]`. Repeating `0` in the list is how you buy idle
+time — the door opens for one dwell at index 3, again at index 6, and the
+whole 8-minute walk then repeats. Compare with the `step` plot above: same
+staircase look, but this one comes back around.
+
+```mermaid
+xychart-beta
+    title "cycle: dwell_seconds 60 over [0,0,0,8,0,0,14,0], walk repeats at 480 s"
+    x-axis "simulation seconds" 0 --> 600
+    y-axis "seconds open" 0 --> 16
+    line [0, 0, 0, 0, 0, 0, 0, 0, 0, 8, 8, 8, 0, 0, 0, 0, 0, 0, 14, 14, 14, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+```
+
+### 5.1 Drift modifier
+
+Allowed only on `gaussian_noise` and `sinusoidal`. Runs **before** the
+behavior:
+
+```text
+state.base = clamp(state.base + rate × dt, bounds)
+```
+
+`enabled: false` MUST skip the modifier.
 
 ---
 
-## Drift Modifier
+## 6. Fleet diversity
 
-`gaussian_noise` and `sinusoidal` can include an optional `drift:` block that slowly
-shifts their center (`state.base`) over time. This models long-term sensor creep,
-gradual environmental changes, or a slowly worsening condition.
+Two processes MUST NOT replay the same curve just because they share a
+numeric `--seed`.
 
-```yaml
-simulation:
-  behavior: gaussian_noise
-  std_dev: 0.3
-  drift:
-    enabled: true
-    rate: 0.01        # center drifts +0.01°C per tick
-    bounds: [18.0, 35.0]
+At `Device::new`:
+
+- Mix `--seed` with `name`, `type`, and `identity` (`vendor`, `product`,
+  `revision`) via FNV-1a. Unseeded devices use OS entropy.
+- `sinusoidal` / `square` / `sawtooth` / `triangle` / `cycle` / `step` get
+  a random `phase_s` inside one period (`square`/`sawtooth`/`triangle`:
+  `0..period_seconds`; `cycle`: one full walk `0..(dwell_seconds ×
+  len(values))`; `step`: `0..60` s).
+- `gaussian_noise` jitters `state.base` by one sample of `std_dev`.
+- `drift` jitters `state.base` by ~2% of the bound span, then clamps.
+
+The bank still shows YAML defaults until the **first** tick. After that,
+values come from the jittered operating point.
+
+Two processes booted from the **same** `--seed` and the same T&H map, with
+different `name` / `identity`, on the 12-hour `humidity` sine. Same period,
+same amplitude, same operating point — different `phase_s`, so a poller that
+sweeps a rack of them sees a spread of values at any instant instead of one
+value repeated. Give two devices the same seed **and** the same identity and
+they do line up; that is the reproducible-lab case.
+
+```mermaid
+%%{init: {"themeVariables": {"xyChart": {"plotColorPalette": "#2e86de, #e67e22"}}}}%%
+xychart-beta
+    title "fleet: one --seed, two identities, two phase_s draws"
+    x-axis "simulation hours" 0 --> 24
+    y-axis "%RH" 38 --> 52
+    line [49.76, 48.35, 46.04, 43.45, 41.28, 40.11, 40.24, 41.65, 43.96, 46.55, 48.72, 49.89, 49.76, 48.35, 46.04, 43.45, 41.28, 40.11, 40.24, 41.65, 43.96, 46.55, 48.72, 49.89, 49.76]
+    line [40.09, 41.22, 43.36, 45.94, 48.27, 49.72, 49.91, 48.78, 46.64, 44.06, 41.73, 40.28, 40.09, 41.22, 43.36, 45.94, 48.27, 49.72, 49.91, 48.78, 46.64, 44.06, 41.73, 40.28, 40.09]
 ```
 
-| Parameter | Type | Required | Description |
-| --- | --- | --- | --- |
-| `enabled` | bool | no (default: `true`) | Set to `false` to define the modifier but disable it |
-| `rate` | float | yes | Change in `state.base` per tick. Negative = drift downward |
-| `bounds` | [float, float] | yes | Hard clamp on `state.base`. `bounds[0]` must be < `bounds[1]` |
-
-The drift modifier runs **before** the behavior computation, so the noise or sine wave
-is always centered on the current (drifted) base — the output gradually migrates.
-
-```yaml
-# T&H sensor: temperature slowly drifts toward 35°C, noise oscillates around the moving center
-simulation:
-  behavior: gaussian_noise
-  std_dev: 0.3
-  drift:
-    enabled: true
-    rate: 0.01
-    bounds: [18.0, 35.0]
-
-# Sinusoidal humidity with a slow downward drift — gradually drying out
-simulation:
-  behavior: sinusoidal
-  period_hours: 6
-  amplitude: 5.0
-  drift:
-    enabled: true
-    rate: -0.002
-    bounds: [20.0, 80.0]
-```
+`POST /simulation/reset` MUST restore each register’s **boot** `RegState`
+(jittered base, original `phase_s`, `elapsed_s = 0`), rewind the bank to
+YAML defaults, restore the RNG stream to its post-init state, and clear
+faults. It MUST NOT re-roll from the OS. A seeded device MUST replay the
+same post-reset trace as after `new`. `tick_interval` is unchanged.
 
 ---
 
-## Alarm Triggers
+## 7. Triggers
 
-Coils and discrete inputs can declare a `trigger:` block that automatically sets their
-value based on a holding (or input) register crossing a threshold. The engine evaluates
-all triggers on every tick after computing new register values.
+After numeric writes, every coil and discrete with `trigger:` is evaluated
+from the source register’s **real** value (`raw / scale`).
 
-```yaml
-coils:
-  - address: 0
-    name: high_temp_alarm
-    default: false
-    trigger:
-      source_register: temperature   # name of a holding or input register
-      condition: gt                  # gt | lt | eq | gte | lte
-      threshold: 30.0                # real-world value (not raw)
-```
-
-| Field | Description |
+| condition | meaning |
 | --- | --- |
-| `source_register` | Name of the register to watch. Must exist in `holding` or `input`. Validated at load time. |
-| `condition` | Comparison operator: `gt` (>), `lt` (<), `eq` (==), `gte` (>=), `lte` (<=) |
-| `threshold` | Real-world value (after scale division). Compared against `raw / scale` on each tick. |
+| `gt` / `lt` / `gte` / `lte` | ordinary comparison |
+| `eq` | `|value − threshold| ≤ 0.5 / scale` (half a raw LSB) |
 
-**Important:** `threshold` is in real-world units, not raw register units.
-For a temperature register with `scale: 10`, a threshold of `30.0` means 30.0°C —
-not a raw value of 30.
+`eq` is quantized on purpose: two encodings of the same cell MUST match.
 
-Coils without a `trigger:` are static. They keep their `default` value and can only
-be changed by the Modbus client (FC5/FC15 write) or by an `alarm` fault.
+Coils without a trigger stay at `default` unless written (Modbus or API) or
+forced by an `alarm` fault. A triggered coil MAY be written, but the next
+tick overwrites it.
 
-**Discrete inputs** follow the same trigger format. They are read-only to Modbus
-clients (FC2), but the engine writes their value through the trigger evaluation.
-
-```yaml
-discrete:
-  - address: 0
-    name: unit_on
-    default: true
-    # no trigger — static read-only status bit
-
-  - address: 1
-    name: door_open
-    default: false
-    trigger:
-      source_register: door_sensor_raw
-      condition: gt
-      threshold: 0.5
-```
-
-**Alarm metadata:** The optional top-level `alarms:` section attaches names and severity
-levels to coil states. This is purely metadata for display — it does not affect engine
-behavior or Modbus register values.
-
-```yaml
-alarms:
-  - name: "High Temperature"
-    severity: warning    # info | warning | critical
-    trigger: high_temp_alarm    # name of the coil (not the register)
-```
+Top-level `alarms:` is metadata. It MUST NOT change bank values.
 
 ---
 
-## Fault Injection
+## 8. Faults
 
-Faults are temporary overrides injected at runtime via the REST API. They expire
-automatically after `duration_s` seconds. Only one fault per register name (or device)
-can be active at a time — injecting a second fault for the same register replaces the
+Faults are TTL overrides. Key = register or coil `name`, or `_device` when
+`register_name` is omitted. A second inject for the same key replaces the
 first.
 
-**Inject via REST:**
+`duration_s` is simulation seconds. `remaining_s` decreases by `dt`.
 
-```bash
-curl -X POST http://localhost:8000/faults \
-  -H "Content-Type: application/json" \
-  -d '{
-    "fault_type": "spike",
-    "register_name": "temperature",
-    "value": 45.0,
-    "duration_s": 30
-  }'
-```
+Lookup on a numeric register: named fault, else `_device`.
 
-**Fields:**
-
-| Field | Type | Description || --- | --- | --- |
-| `fault_type` | string | One of: `spike`, `freeze`, `dropout`, `noise_amplify`, `alarm` |
-| `register_name` | string \| null | Name of the target register or coil. `null` applies to all registers (`dropout` device-wide) |
-| `value` | float \| null | Fault parameter. Meaning depends on type (see below) |
-| `duration_s` | float | Seconds until the fault expires and normal simulation resumes |
-
-**Manage faults:**
-
-```bash
-# List active faults with remaining TTL
-curl http://localhost:8000/faults
-
-# Clear all faults immediately
-curl -X DELETE http://localhost:8000/faults
-```
-
----
-
-### spike
-
-Forces a register to a specific real-world value for the duration, overriding normal
-behavior computation. When the fault expires, the register returns to the behavior
-output on the next tick.
-
-```bash
-# Force temperature to 45.0°C for 60 seconds
-curl -X POST http://localhost:8000/faults \
-  -d '{
-    "fault_type": "spike",
-    "register_name": "temperature",
-    "value": 45.0,
-    "duration_s": 60
-  }'
-```
-
-| Field | Value |
+| type | effect |
 | --- | --- |
-| `register_name` | Name of any holding register |
-| `value` | Target real-world value (before scale) |
+| `spike` | If `value` is set, force that real. Missing `value` is a no-op. Holding **and** input. |
+| `freeze` | Latch the cell’s real value **at inject**. Later PATCH/FC6 change `state.base` but the frozen output stays until expiry. Holding and input. |
+| `dropout` | Force `0`. Named: one register. `_device`: every holding **and** input cell. |
+| `noise_amplify` | After the behavior, add Extra Normal noise with `std_dev × value` (default factor `10`). On non-gaussian behaviors the `std_dev` fallback is `0.5`. |
+| `alarm` | Force the **coil** of that name to `true`, skip trigger. Does not change registers. Unknown name: stored, no effect. Discrete is not a target. |
 
-**Use cases:**
+The four numeric types plotted on the same window: T&H `temperature`
+(`gaussian_noise` around 22.5 °C), one fault injected at t = 30 s with
+`duration_s: 60`, so every fault expires at t = 90 s and the trace returns
+to the untouched line without a further request.
 
-- Trigger a specific alarm to test downstream SCADA logic
-- Push a value to an exact threshold to verify alarm hysteresis
-- Simulate a sensor producing a reading beyond its physical range
+`spike` replaces the value with the one you sent. `freeze` latches whatever
+the cell held **at inject** — here 23.07 °C, a value nobody chose, which is
+why a frozen channel is the honest way to simulate a stalled sensor rather
+than a wrong one.
 
----
-
-### freeze
-
-Holds a register at its current raw value — the register appears stuck. The behavior
-function is still called internally, but the output is replaced by whatever value was
-in the store when the fault was applied.
-
-```bash
-# Freeze battery_soc at its current value for 5 minutes
-curl -X POST http://localhost:8000/faults \
-  -d '{
-    "fault_type": "freeze",
-    "register_name": "battery_soc",
-    "value": null,
-    "duration_s": 300
-  }'
+```mermaid
+%%{init: {"themeVariables": {"xyChart": {"plotColorPalette": "#2e86de, #e67e22"}}}}%%
+xychart-beta
+    title "spike to 35.0 (plateau) vs freeze (flat at the inject value), 30 s for 60 s"
+    x-axis "simulation seconds" 0 --> 150
+    y-axis "°C" 20 --> 37
+    line [22.53, 22.88, 22.22, 22.8, 22.42, 22.42, 35, 35, 35, 35, 35, 35, 35, 35, 35, 35, 35, 35, 22.01, 22.43, 22.45, 22.4, 22.52, 22.1, 22.48, 22.57, 22.73, 22.25, 22.38, 21.9, 22.35]
+    line [22.53, 22.88, 22.22, 22.8, 22.42, 22.42, 23.07, 23.07, 23.07, 23.07, 23.07, 23.07, 23.07, 23.07, 23.07, 23.07, 23.07, 23.07, 22.01, 22.43, 22.45, 22.4, 22.52, 22.1, 22.48, 22.57, 22.73, 22.25, 22.38, 21.9, 22.35]
 ```
 
-| Field | Value |
-| --- | --- |
-| `register_name` | Name of any holding register |
-| `value` | Not used — pass `null` |
+`dropout` forces `0`, which on a scaled `uint16` is a legal reading and not
+an error — that is the point of the fault, and it is why a client that
+treats 0 °C as "no data" has a bug worth finding. `noise_amplify` keeps the
+mean and multiplies the spread (`std_dev × value`, default factor 10): the
+channel stays plausible on average while every individual sample becomes
+unusable.
 
-**Use cases:**
-
-- Simulate a stuck sensor (common failure mode)
-- Test that SCADA detects stale / non-changing values
-- Hold a value constant while testing other parts of the system
-
----
-
-### dropout
-
-Sets a register to `0` — simulating complete loss of signal. Pass `register_name: null`
-to drop all holding registers simultaneously (full device communication loss).
-
-```bash
-# Single register dropout
-curl -X POST http://localhost:8000/faults \
-  -d '{
-    "fault_type": "dropout",
-    "register_name": "input_voltage",
-    "value": null,
-    "duration_s": 10
-  }'
-
-# Device-wide dropout — all registers go to 0
-curl -X POST http://localhost:8000/faults \
-  -d '{
-    "fault_type": "dropout",
-    "register_name": null,
-    "value": null,
-    "duration_s": 15
-  }'
+```mermaid
+%%{init: {"themeVariables": {"xyChart": {"plotColorPalette": "#2e86de, #e67e22"}}}}%%
+xychart-beta
+    title "dropout to 0 (floor) vs noise_amplify factor 10 (wide band), 30 s for 60 s"
+    x-axis "simulation seconds" 0 --> 150
+    y-axis "°C" 0 --> 35
+    line [22.15, 22.16, 22.7, 21.81, 22.46, 21.82, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 22.38, 23.16, 22.52, 22.32, 22.55, 22.34, 22.38, 22.39, 23.11, 22.51, 22.55, 22.7, 23.11]
+    line [22.15, 22.16, 22.7, 21.81, 22.46, 21.82, 22.16, 20.69, 30.33, 17.97, 21.52, 24.41, 29.13, 19.69, 14.84, 24.38, 21.14, 21.35, 22.38, 23.16, 22.52, 22.32, 22.55, 22.34, 22.38, 22.39, 23.11, 22.51, 22.55, 22.7, 23.11]
 ```
 
-| Field | Value |
-| --- | --- |
-| `register_name` | Register name for single dropout, `null` for device-wide |
-| `value` | Not used — pass `null` |
-
-**Use cases:**
-
-- Test SCADA handling of communication loss
-- Verify that `0` values don't incorrectly trigger alarms (e.g., temperature reads 0°C)
-- Test watchdog and timeout logic in polling clients
-- Simulate a sensor that lost power
-
----
-
-### noise\_amplify
-
-Multiplies the `std_dev` of the current behavior by `value` on each tick for the
-duration. The register stays "alive" but becomes erratic. Only meaningful for
-`gaussian_noise` registers — on other behavior types it applies Gaussian noise using
-the amplified `std_dev` around the computed value.
-
-```bash
-# Make temperature sensor very noisy for 2 minutes
-curl -X POST http://localhost:8000/faults \
-  -d '{
-    "fault_type": "noise_amplify",
-    "register_name": "temperature",
-    "value": 20.0,
-    "duration_s": 120
-  }'
+```mermaid
+stateDiagram-v2
+    [*] --> Live
+    Live --> Frozen: inject freeze
+    Frozen --> Frozen: PATCH, FC6, or OPC UA write updates base only
+    Frozen --> Live: TTL expired
 ```
 
-| Field | Value |
-| --- | --- |
-| `register_name` | Name of any holding register |
-| `value` | Multiplier for the noise standard deviation. `10.0` = 10× noisier |
-
-**Choosing the multiplier:**
-
-- `2.0` — slightly degraded sensor (barely noticeable)
-- `5.0` — clearly unstable sensor, occasional outliers
-- `20.0` — severely degraded, highly erratic readings
-- `100.0` — extreme noise, values essentially random within register range
-
-**Use cases:**
-
-- Test SCADA alarm filtering and debounce logic
-- Simulate a sensor with a loose connection
-- Verify that noise filtering doesn't suppress real alarms
-- Test operator response to "noisy" readings vs. genuine spikes
+When a fault expires, the next tick uses normal behavior / triggers.
 
 ---
 
-### alarm
+## 9. Encode
 
-Forces a named **coil** to `True` for the duration, bypassing the normal trigger
-evaluation. The register values are not affected — only the coil state is overridden.
-When the fault expires the coil reverts to normal trigger-based evaluation on the
-next tick.
+`raw ≈ round(real × scale)`, then clamp to the type range:
 
-```bash
-# Force high_temp_alarm coil active for 45 seconds
-# (temperature register stays at its normal value — alarm fires "without cause")
-curl -X POST http://localhost:8000/faults \
-  -d '{
-    "fault_type": "alarm",
-    "register_name": "high_temp_alarm",
-    "value": null,
-    "duration_s": 45
-  }'
-```
-
-| Field | Value |
+| type | clamp |
 | --- | --- |
-| `register_name` | Name of a **coil** (not a register) |
-| `value` | Not used — pass `null` |
+| `uint16` | `[0, 65535]` |
+| `int16` | `[i16::MIN, i16::MAX]` |
+| `uint32` | `[0, u32::MAX]` |
+| `float32` | finite `f32` range |
 
-**Why this is different from `spike`:**
-
-- `spike` raises the register value above the trigger threshold, causing the coil to
-  fire through normal evaluation. Use it when the test requires a realistic causal
-  chain (sensor reads high → alarm fires).
-- `alarm` forces the coil directly without touching any register. Use it when you want
-  to test the downstream SCADA response to the alarm bit itself, independent of what
-  the sensor currently reads.
-
-> **Note:** `alarm` targets a coil by name — use the coil's `name` field from the
-> YAML, not the register name. If you pass a register name the fault is stored but
-> has no effect (no coil matches).
-
-**Use cases:**
-
-- Test SCADA alarm acknowledgement workflows
-- Verify alarm journal entries and notifications
-- Test alarm priority and suppression logic
-- Simulate a coil forced by an external system (e.g., manual alarm test button)
+The engine MUST NOT wrap `uint16` (a spiked temperature MUST NOT become a
+small unsigned value). Multi-word cells use document `endianness`.
 
 ---
 
-## Practical Recipes
+## 10. Scenarios
 
-### Recipe 1 — Test a high-temperature alarm in Ignition
+`Device::apply_step` mutates this device immediately. The runner in this
+crate only tracks generation / progress; sleeps live in the HTTP layer
+([control.md](control.md)).
+
+Unknown register or coil names in a step MUST be skipped (warn), not panic.
+
+---
+
+## 11. Change process
+
+1. Update this document.
+2. Change `crates/engine` (tick, behaviors, encode, faults, reset).
+3. Cover the new rule in `crates/engine/tests/engine.rs` or a unit test
+   next to the function.
+4. YAML catalog files stay validated by `simbus check`, not by enumerating
+   them here.
+
+Language syntax still starts in [spec.md](spec.md). HTTP verbs still start
+in [control.md](control.md).
+
+---
+
+## 12. Recipes (session)
+
+These assume a running process. They do not extend the tick contract.
+
+**High-temp alarm (generic T&H):**
 
 ```bash
-# 1. Confirm the alarm is currently clear
-curl http://localhost:8000/registers
-# coils: {"0": false}
-
-# 2. Spike temperature above the 30°C threshold for 60 seconds
 curl -X POST http://localhost:8000/faults \
   -d '{"fault_type":"spike","register_name":"temperature","value":35.0,"duration_s":60}'
-
-# 3. In Ignition: verify the alarm fires in the Alarm Journal
-
-# 4. After 60 seconds, fault expires — verify alarm auto-clears
-curl http://localhost:8000/faults   # should return []
 ```
 
----
-
-### Recipe 2 — Simulate UPS discharge and low-battery alarm
+**Dropout the whole map:**
 
 ```bash
-# 1. Use drift behavior (already configured) or accelerate with a direct PATCH
-# Set battery_soc to 25% (raw = 250 for scale 10)
-curl -X PATCH http://localhost:8000/registers/0 \
-  -d '{"value": 250}'
+curl -X POST http://localhost:8000/faults \
+  -d '{"fault_type":"dropout","register_name":null,"value":null,"duration_s":30}'
+```
 
-# 2. Let drift run — battery_soc drifts toward 0
-# OR force it past the 20% alarm threshold immediately
-curl -X PATCH http://localhost:8000/registers/0 \
-  -d '{"value": 190}'    # 19% → below threshold → low_battery_alarm fires
+**Rewind to boot (same seeded trace):**
 
-# 3. Restore
+```bash
 curl -X POST http://localhost:8000/simulation/reset
 ```
 
----
-
-### Recipe 3 — Verify SCADA handles communication loss
+**Watch the bank** (control samples; not a tick callback):
 
 ```bash
-# Drop all registers to 0 for 30 seconds
-curl -X POST http://localhost:8000/faults \
-  -d '{"fault_type":"dropout","register_name":null,"value":null,"duration_s":30}'
-
-# Confirm the SCADA system raises a "device offline" or "stale data" alert
-# After 30s the fault expires and registers return to normal simulation
-```
-
----
-
-### Recipe 4 — Test alarm debounce with noisy sensor
-
-```bash
-# Amplify temperature noise by 50× for 2 minutes
-# Values will swing wildly — verify SCADA doesn't fire an alarm on transient spikes
-curl -X POST http://localhost:8000/faults \
-  -d '{"fault_type":"noise_amplify","register_name":"temperature","value":50.0,"duration_s":120}'
-```
-
----
-
-### Recipe 5 — Reproducible test run with a fixed seed
-
-Set `SIMBUS_SEED=42` (or any integer) via environment variable or `.env`.
-The RNG is seeded once at startup — every run produces the same sequence of
-`gaussian_noise` values, making test assertions deterministic.
-
-```bash
-docker run --cap-add NET_BIND_SERVICE \
-  -e SIMBUS_SEED=42 -e SIMBUS_DEVICE_TYPE=generic-tnh-sensor \
-  -p 5020:502 -p 8000:8000 simbus:latest
-```
-
----
-
-### Recipe 6 — Observe live register values while injecting faults
-
-```bash
-# Terminal 1 — subscribe to the SSE stream
 curl -N http://localhost:8000/registers/stream
-
-# Terminal 2 — inject faults and watch the stream react in real time
-curl -X POST http://localhost:8000/faults \
-  -d '{"fault_type":"spike","register_name":"temperature","value":45.0,"duration_s":30}'
 ```
-
----
-
-### Recipe 7 — Step behavior as a scripted scenario
-
-Use the `step` behavior to pre-script a device lifecycle without any API calls during
-the test. The scenario runs automatically from `elapsed_s = 0` on each `reset`.
-
-```yaml
-# UPS going through: normal → on-battery → low-battery → shutdown
-registers:
-  holding:
-    - address: 0
-      name: battery_soc
-      default: 100.0
-      scale: 10
-      simulation:
-        behavior: step
-        steps:
-          - at: 0      value: 100.0   # fully charged
-          - at: 60     value: 80.0    # power fails, on battery
-          - at: 120    value: 40.0    # 40% remaining
-          - at: 180    value: 15.0    # low battery — alarm fires (threshold 20%)
-          - at: 240    value: 5.0     # critical
-```
-
-After each test call `POST /simulation/reset` to rewind `elapsed_s` to `0` and run
-the sequence again.

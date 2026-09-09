@@ -1,0 +1,142 @@
+# Official default template. Mixed example channels for the simulation
+# engine — not a model of a specific field product. Copy this file or
+# point `--file` at another template under devices/builtin or devices/community.
+#
+# Language 2: canonical points, explicit protocol export — same as every
+# other map under devices/.
+
+name: "Example Device"
+spec_version: 2
+version: "1.0"
+type: example
+description: >
+  Default simbus map when no YAML path is given. Several analog channels
+  with different behaviors, plus one alarm coil. Use this as a starting
+  point; official product-shaped templates live beside this file.
+
+identity:
+  vendor: Obsidia
+  product: Example Device
+  revision: "1.0"
+
+points:
+  - id: analog_a
+    kind: analog
+    class: value
+    description: "Noisy analog channel"
+    unit: "units"
+    default: 50.0
+    simulation:
+      behavior: gaussian_noise
+      std_dev: 1.5
+      drift:
+        enabled: true
+        rate: 0.02
+        bounds: [10.0, 90.0]
+
+  - id: analog_b
+    kind: analog
+    class: value
+    description: "Slow cyclic analog channel"
+    unit: "units"
+    default: 40.0
+    simulation:
+      behavior: sinusoidal
+      period_hours: 6
+      amplitude: 8.0
+
+  - id: analog_c
+    kind: analog
+    class: value
+    description: "Fixed analog channel until written"
+    unit: "units"
+    default: 12.5
+    simulation:
+      behavior: constant
+
+  - id: accumulator
+    kind: analog
+    class: value
+    description: "Slowly increasing example counter"
+    unit: "counts"
+    default: 0.0
+    simulation:
+      behavior: drift
+      rate: 0.5
+      bounds: [0.0, 1000.0]
+
+  - id: sample_input
+    kind: analog
+    class: input
+    description: "Example input register (FC4)"
+    unit: "units"
+    default: 100.0
+    simulation:
+      behavior: gaussian_noise
+      std_dev: 0.4
+
+  - id: analog_a_high
+    kind: binary
+    class: input
+    description: "analog_a above threshold"
+    default: false
+    trigger:
+      source: analog_a
+      condition: gt
+      threshold: 80.0
+
+bindings:
+  - protocol: modbus-tcp
+    port: 502
+    unit_id: 1
+    endianness: big
+    export:
+      analog_a:
+        space: holding
+        address: 0
+        scale: 10
+        data_type: uint16
+      analog_b:
+        space: holding
+        address: 1
+        scale: 10
+        data_type: uint16
+      analog_c:
+        space: holding
+        address: 2
+        scale: 10
+        data_type: uint16
+      accumulator:
+        space: holding
+        address: 3
+        scale: 1
+        data_type: uint16
+      sample_input:
+        space: input
+        address: 0
+        scale: 10
+        data_type: uint16
+      analog_a_high:
+        space: coil
+        address: 0
+
+alarms:
+  - name: Analog A high
+    severity: warning
+    trigger: analog_a_high
+
+scenarios:
+  - id: demo-spike
+    name: Demo spike
+    description: Brief spike on analog_a to exercise alarms and faults.
+    steps:
+      - at: 0
+        action: inject_fault
+        fault_type: spike
+        point: analog_a
+        value: 95.0
+        duration_s: 15
+      - at: 20
+        action: set_point
+        point: analog_a
+        value: 50.0

@@ -1,0 +1,531 @@
+# Generic precision cooling unit (CRAC / CRAH).
+#
+# Point set follows what precision cooling controllers expose to a BMS
+# (Vertiv Liebert iCOM, Stulz C7000, Uniflair): unit status, return and
+# supply air temperature, return humidity, writable temperature / humidity /
+# dew-point setpoints, cooling capacity and fan capacity in percent, valve
+# position, compressor and humidifier state, run hours, and the alarm set
+# (high return temp, low supply temp, high humidity, filter clog, water under
+# floor, loss of airflow).
+#
+# Nominal: chilled-water downflow unit, degC, 50 Hz plant. Setpoints are
+# holding registers so a BMS can write them; measurements are input
+# registers; commands and alarms are coils and discrete inputs.
+#
+# A real CRAC is usually integrated over BACnet/IP. Official builtin maps stay
+# Modbus-only because Compose does not publish 47808 — see docs/bacnet.md for
+# the `bacnet-ip` binding to add in a lab copy of this file.
+
+name: "Generic CRAC"
+spec_version: 2
+version: "1.1"
+type: crac
+description: >
+  Precision cooling unit with the controller point set a BMS integrator maps:
+  return/supply air, humidity, writable setpoints, capacity and fan percent,
+  component state, run hours, and unit alarms.
+
+identity:
+  vendor: Obsidia
+  product: Generic CRAC
+  revision: "1.1"
+
+points:
+  # ---- Measurements ----------------------------------------------------
+  - id: return_air_temp
+    kind: analog
+    class: input
+    description: "Return air temperature (hot aisle, unit inlet)"
+    unit: "°C"
+    default: 28.0
+    simulation:
+      behavior: sinusoidal
+      period_hours: 1
+      amplitude: 2.0
+
+  - id: supply_air_temp
+    kind: analog
+    class: input
+    description: "Supply air temperature (cold aisle, unit outlet)"
+    unit: "°C"
+    default: 18.0
+    simulation:
+      behavior: gaussian_noise
+      std_dev: 0.2
+      drift:
+        enabled: true
+        rate: 0.003
+        bounds: [15.0, 25.0]
+
+  - id: return_air_humidity
+    kind: analog
+    class: input
+    description: "Return air relative humidity"
+    unit: "%RH"
+    default: 45.0
+    simulation:
+      behavior: sinusoidal
+      period_hours: 6
+      amplitude: 4.0
+
+  - id: return_air_dewpoint
+    kind: analog
+    class: input
+    description: "Return air dew point"
+    unit: "°C"
+    default: 12.4
+    simulation:
+      behavior: sinusoidal
+      period_hours: 6
+      amplitude: 1.0
+
+  - id: cooling_capacity
+    kind: analog
+    class: input
+    description: "Cooling capacity currently called for"
+    unit: "%"
+    default: 62.0
+    simulation:
+      behavior: gaussian_noise
+      std_dev: 1.5
+
+  - id: fan_capacity
+    kind: analog
+    class: input
+    description: "Supply fan capacity (airflow)"
+    unit: "%"
+    default: 70.0
+    simulation:
+      behavior: gaussian_noise
+      std_dev: 1.0
+
+  - id: chilled_water_valve
+    kind: analog
+    class: output
+    description: "Chilled water valve position command"
+    unit: "%"
+    default: 55.0
+    simulation:
+      behavior: gaussian_noise
+      std_dev: 1.5
+
+  - id: fan_run_hours
+    kind: analog
+    class: input
+    description: "Supply fan run hours"
+    unit: "h"
+    default: 24680.0
+    simulation:
+      # One hour per 3600 simulation seconds. The engine spreads a drift
+      # channel's starting value by 2 % of the span, so the bounds stay close
+      # to the default rather than covering the counter's full range.
+      behavior: drift
+      rate: 0.00028
+      bounds: [24680.0, 24800.0]
+
+  - id: filter_pressure_drop
+    kind: analog
+    class: input
+    description: "Pressure drop across the air filters"
+    unit: "Pa"
+    default: 95.0
+    simulation:
+      behavior: gaussian_noise
+      std_dev: 2.0
+      drift:
+        enabled: true
+        rate: 0.004         # filters load up over a long run
+        bounds: [80.0, 320.0]
+
+  # ---- Setpoints and mode (writable) -----------------------------------
+  - id: temperature_setpoint
+    kind: analog
+    class: value
+    description: "Supply/return temperature control setpoint"
+    unit: "°C"
+    default: 22.0
+    simulation:
+      behavior: constant
+
+  - id: humidity_setpoint
+    kind: analog
+    class: value
+    description: "Relative humidity control setpoint"
+    unit: "%RH"
+    default: 45.0
+    simulation:
+      behavior: constant
+
+  - id: dewpoint_setpoint
+    kind: analog
+    class: value
+    description: "Dew point control setpoint"
+    unit: "°C"
+    default: 11.0
+    simulation:
+      behavior: constant
+
+  - id: unit_status
+    kind: analog
+    class: value
+    description: >
+      Unit status code: 0 local on, 2 local off, 3 remote off, 6 manual,
+      7 alarm off, 8 power failure, 9 alarm on, 10 warning on, 11 system off,
+      12 standby.
+    unit: ""
+    default: 0.0
+    simulation:
+      behavior: constant
+
+  # ---- Component state -------------------------------------------------
+  - id: unit_on
+    kind: binary
+    class: value
+    description: "Unit enabled and running"
+    default: true
+
+  - id: compressor_on
+    kind: binary
+    class: value
+    description: "Compressor / cooling stage active"
+    default: true
+
+  - id: humidifier_on
+    kind: binary
+    class: value
+    description: "Humidifier active"
+    default: false
+
+  - id: dehumidifying
+    kind: binary
+    class: value
+    description: "Unit is dehumidifying"
+    default: false
+
+  - id: reheat_on
+    kind: binary
+    class: value
+    description: "Reheat stage active"
+    default: false
+
+  # ---- Alarms ----------------------------------------------------------
+  - id: high_return_temp_alarm
+    kind: binary
+    class: input
+    description: "Return air temperature critically high"
+    default: false
+    trigger:
+      source: return_air_temp
+      condition: gt
+      threshold: 35.0
+
+  - id: low_supply_temp_alarm
+    kind: binary
+    class: input
+    description: "Supply air temperature below the safe minimum"
+    default: false
+    trigger:
+      source: supply_air_temp
+      condition: lt
+      threshold: 12.0
+
+  - id: high_humidity_alarm
+    kind: binary
+    class: input
+    description: "Return humidity above the upper limit"
+    default: false
+    trigger:
+      source: return_air_humidity
+      condition: gt
+      threshold: 70.0
+
+  - id: filter_clog_alarm
+    kind: binary
+    class: input
+    description: "Filter pressure drop above the change-filters limit"
+    default: false
+    trigger:
+      source: filter_pressure_drop
+      condition: gt
+      threshold: 250.0
+
+  - id: loss_of_airflow_alarm
+    kind: binary
+    class: input
+    description: "Airflow lost while the unit is calling for cooling"
+    default: false
+    trigger:
+      source: fan_capacity
+      condition: lt
+      threshold: 10.0
+
+  - id: water_under_floor_alarm
+    kind: binary
+    class: value
+    description: "Water detected under the floor by the unit's leak input"
+    default: false
+
+bindings:
+  - protocol: modbus-tcp
+    port: 502
+    unit_id: 1
+    endianness: big
+    export:
+      # Measurements: read-only input registers.
+      return_air_temp:
+        space: input
+        address: 0
+        scale: 10
+        data_type: int16
+      supply_air_temp:
+        space: input
+        address: 1
+        scale: 10
+        data_type: int16
+      return_air_humidity:
+        space: input
+        address: 2
+        scale: 10
+        data_type: uint16
+      return_air_dewpoint:
+        space: input
+        address: 3
+        scale: 10
+        data_type: int16
+      cooling_capacity:
+        space: input
+        address: 4
+        scale: 10
+        data_type: uint16
+      fan_capacity:
+        space: input
+        address: 5
+        scale: 10
+        data_type: uint16
+      chilled_water_valve:
+        space: input
+        address: 6
+        scale: 10
+        data_type: uint16
+      fan_run_hours:
+        space: input
+        address: 7
+        scale: 1
+        data_type: uint32     # occupies 7 and 8
+      filter_pressure_drop:
+        space: input
+        address: 9
+        scale: 1
+        data_type: uint16
+      # Setpoints and mode: writable holding registers.
+      temperature_setpoint:
+        space: holding
+        address: 0
+        scale: 10
+        data_type: int16
+      humidity_setpoint:
+        space: holding
+        address: 1
+        scale: 10
+        data_type: uint16
+      dewpoint_setpoint:
+        space: holding
+        address: 2
+        scale: 10
+        data_type: int16
+      unit_status:
+        space: holding
+        address: 3
+        scale: 1
+        data_type: uint16
+      # Component state: writable coils.
+      unit_on:
+        space: coil
+        address: 0
+      compressor_on:
+        space: coil
+        address: 1
+      humidifier_on:
+        space: coil
+        address: 2
+      dehumidifying:
+        space: coil
+        address: 3
+      reheat_on:
+        space: coil
+        address: 4
+      water_under_floor_alarm:
+        space: coil
+        address: 5
+      # Engine-owned alarms: read-only discrete inputs.
+      high_return_temp_alarm:
+        space: discrete
+        address: 0
+      low_supply_temp_alarm:
+        space: discrete
+        address: 1
+      high_humidity_alarm:
+        space: discrete
+        address: 2
+      filter_clog_alarm:
+        space: discrete
+        address: 3
+      loss_of_airflow_alarm:
+        space: discrete
+        address: 4
+
+alarms:
+  - name: "High Return Temperature"
+    severity: critical
+    trigger: high_return_temp_alarm
+  - name: "Low Supply Temperature"
+    severity: warning
+    trigger: low_supply_temp_alarm
+  - name: "High Humidity"
+    severity: warning
+    trigger: high_humidity_alarm
+  - name: "Change Filters"
+    severity: info
+    trigger: filter_clog_alarm
+  - name: "Loss Of Airflow"
+    severity: critical
+    trigger: loss_of_airflow_alarm
+  - name: "Water Under Floor"
+    severity: critical
+    trigger: water_under_floor_alarm
+
+scenarios:
+  - id: cooling-loss
+    name: Cooling Loss
+    description: >
+      The compressor stops, supply and return air climb, and the high return
+      temperature alarm fires before the unit recovers.
+    steps:
+      - at: 0
+        action: set_point
+        point: compressor_on
+        value: false
+      - at: 0
+        action: set_point
+        point: cooling_capacity
+        value: 0.0
+      - at: 10
+        action: set_point
+        point: supply_air_temp
+        value: 24.0
+      - at: 20
+        action: set_point
+        point: return_air_temp
+        value: 33.0
+      - at: 30
+        action: set_point
+        point: return_air_temp
+        value: 37.5
+      - at: 90
+        action: set_point
+        point: compressor_on
+        value: true
+      - at: 90
+        action: set_point
+        point: cooling_capacity
+        value: 100.0
+      - at: 120
+        action: set_point
+        point: supply_air_temp
+        value: 18.0
+      - at: 120
+        action: set_point
+        point: return_air_temp
+        value: 28.0
+
+  - id: fan-failure
+    name: Fan Failure
+    description: >
+      Supply fan drops out: airflow goes to zero, the loss-of-airflow alarm
+      fires, and the unit reports alarm-on status.
+    steps:
+      - at: 0
+        action: set_point
+        point: fan_capacity
+        value: 0.0
+      - at: 2
+        action: set_point
+        point: unit_status
+        value: 9.0            # alarm on
+      - at: 60
+        action: set_point
+        point: fan_capacity
+        value: 70.0
+      - at: 60
+        action: set_point
+        point: unit_status
+        value: 0.0            # local on
+
+  - id: humidity-excursion
+    name: Humidity Excursion
+    description: >
+      Return humidity rises above the limit, the unit dehumidifies, and the
+      dew point follows it back down.
+    steps:
+      - at: 0
+        action: set_point
+        point: return_air_humidity
+        value: 66.0
+      - at: 10
+        action: set_point
+        point: return_air_humidity
+        value: 74.0
+      - at: 10
+        action: set_point
+        point: return_air_dewpoint
+        value: 18.6
+      - at: 15
+        action: set_point
+        point: dehumidifying
+        value: true
+      - at: 75
+        action: set_point
+        point: return_air_humidity
+        value: 45.0
+      - at: 75
+        action: set_point
+        point: return_air_dewpoint
+        value: 12.4
+      - at: 75
+        action: set_point
+        point: dehumidifying
+        value: false
+
+  - id: clogged-filters
+    name: Clogged Filters
+    description: >
+      Filter pressure drop crosses the change-filters limit, then a
+      maintenance visit resets it.
+    steps:
+      - at: 0
+        action: set_point
+        point: filter_pressure_drop
+        value: 210.0
+      - at: 15
+        action: set_point
+        point: filter_pressure_drop
+        value: 268.0
+      - at: 60
+        action: set_point
+        point: filter_pressure_drop
+        value: 95.0
+
+  - id: floor-water-alarm
+    name: Water Under Floor
+    description: >
+      The unit's leak input closes while cooling stays normal. Tests a
+      critical alarm that no analog value explains.
+    steps:
+      - at: 0
+        action: set_point
+        point: water_under_floor_alarm
+        value: true
+      - at: 45
+        action: set_point
+        point: water_under_floor_alarm
+        value: false

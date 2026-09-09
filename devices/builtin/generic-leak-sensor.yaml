@@ -1,0 +1,327 @@
+# Generic locating water leak detection panel.
+#
+# Point set follows what leak detection controllers report to a BMS (TTK
+# FG-NET, RLE SeaHawk / LD series, Aqualeak): per-zone leak state, per-zone
+# cable-break supervision, and the distance along the sense cable to the
+# fault in metres. Locating panels resolve the position to about 1 m, so the
+# distances are plain 16-bit metre counts.
+#
+# The zone leak flags are engine-owned: they follow their distance channel,
+# so writing a distance (0 = dry) raises and clears the flag the way liquid
+# on the cable does on a real panel.
+#
+# Nominal: two sense-cable circuits under a raised floor around the CRAC
+# units. A real FG-NET manages up to 120 cable lengths; a vendor-exact clone
+# belongs in devices/community/.
+
+name: "Generic Leak Sensor"
+spec_version: 2
+version: "1.1"
+type: leak_sensor
+description: >
+  Locating water leak detection panel: per-zone leak state and distance to
+  the leak in metres, cable-break supervision, panel health, and ambient
+  temperature / humidity for condensation risk.
+
+identity:
+  vendor: Obsidia
+  product: Generic Leak Sensor
+  revision: "1.1"
+
+points:
+  # ---- Leak location ---------------------------------------------------
+  - id: zone_1_leak_distance
+    kind: analog
+    class: input
+    description: "Distance along zone 1 sense cable to the leak (0 = dry)"
+    unit: "m"
+    default: 0.0
+    simulation:
+      behavior: constant
+
+  - id: zone_2_leak_distance
+    kind: analog
+    class: input
+    description: "Distance along zone 2 sense cable to the leak (0 = dry)"
+    unit: "m"
+    default: 0.0
+    simulation:
+      behavior: constant
+
+  - id: active_alarm_count
+    kind: analog
+    class: input
+    description: "Number of leak and cable-break alarms currently active"
+    unit: ""
+    default: 0.0
+    simulation:
+      behavior: constant
+
+  # ---- Installation and ambient ----------------------------------------
+  - id: zone_1_cable_length
+    kind: analog
+    class: value
+    description: "Installed sense cable length on zone 1"
+    unit: "m"
+    default: 120.0
+    simulation:
+      behavior: constant
+
+  - id: zone_2_cable_length
+    kind: analog
+    class: value
+    description: "Installed sense cable length on zone 2"
+    unit: "m"
+    default: 90.0
+    simulation:
+      behavior: constant
+
+  - id: ambient_temperature
+    kind: analog
+    class: input
+    description: "Temperature at the panel sensor"
+    unit: "°C"
+    default: 21.0
+    simulation:
+      behavior: gaussian_noise
+      std_dev: 0.3
+
+  - id: ambient_humidity
+    kind: analog
+    class: input
+    description: "Relative humidity at the panel sensor"
+    unit: "%RH"
+    default: 50.0
+    simulation:
+      behavior: sinusoidal
+      period_hours: 8
+      amplitude: 5.0
+
+  # ---- Leak and supervision flags --------------------------------------
+  - id: zone_1_leak
+    kind: binary
+    class: input
+    description: "Liquid detected on the zone 1 sense cable"
+    default: false
+    trigger:
+      source: zone_1_leak_distance
+      condition: gt
+      threshold: 0.5
+
+  - id: zone_2_leak
+    kind: binary
+    class: input
+    description: "Liquid detected on the zone 2 sense cable"
+    default: false
+    trigger:
+      source: zone_2_leak_distance
+      condition: gt
+      threshold: 0.5
+
+  - id: condensation_risk
+    kind: binary
+    class: input
+    description: "Ambient humidity high: condensation risk near the cable"
+    default: false
+    trigger:
+      source: ambient_humidity
+      condition: gt
+      threshold: 75.0
+
+  - id: zone_1_cable_fault
+    kind: binary
+    class: value
+    description: "Zone 1 sense cable broken or disconnected"
+    default: false
+
+  - id: zone_2_cable_fault
+    kind: binary
+    class: value
+    description: "Zone 2 sense cable broken or disconnected"
+    default: false
+
+  - id: panel_ok
+    kind: binary
+    class: value
+    description: "Panel self-test passed and both circuits are supervised"
+    default: true
+
+  - id: alarm_acknowledged
+    kind: binary
+    class: value
+    description: "Operator acknowledged the active alarm at the panel"
+    default: false
+
+bindings:
+  - protocol: modbus-tcp
+    port: 502
+    unit_id: 1
+    endianness: big
+    export:
+      zone_1_leak_distance:
+        space: input
+        address: 0
+        scale: 1
+        data_type: uint16
+      zone_2_leak_distance:
+        space: input
+        address: 1
+        scale: 1
+        data_type: uint16
+      active_alarm_count:
+        space: input
+        address: 2
+        scale: 1
+        data_type: uint16
+      ambient_temperature:
+        space: input
+        address: 3
+        scale: 10
+        data_type: int16
+      ambient_humidity:
+        space: input
+        address: 4
+        scale: 10
+        data_type: uint16
+      zone_1_cable_length:
+        space: holding
+        address: 0
+        scale: 1
+        data_type: uint16
+      zone_2_cable_length:
+        space: holding
+        address: 1
+        scale: 1
+        data_type: uint16
+      zone_1_leak:
+        space: discrete
+        address: 0
+      zone_2_leak:
+        space: discrete
+        address: 1
+      condensation_risk:
+        space: discrete
+        address: 2
+      zone_1_cable_fault:
+        space: coil
+        address: 0
+      zone_2_cable_fault:
+        space: coil
+        address: 1
+      panel_ok:
+        space: coil
+        address: 2
+      alarm_acknowledged:
+        space: coil
+        address: 3
+
+alarms:
+  - name: "Zone 1 Leak"
+    severity: critical
+    trigger: zone_1_leak
+  - name: "Zone 2 Leak"
+    severity: critical
+    trigger: zone_2_leak
+  - name: "Zone 1 Cable Fault"
+    severity: warning
+    trigger: zone_1_cable_fault
+  - name: "Zone 2 Cable Fault"
+    severity: warning
+    trigger: zone_2_cable_fault
+  - name: "Condensation Risk"
+    severity: warning
+    trigger: condensation_risk
+
+scenarios:
+  - id: chilled-water-leak
+    name: Chilled Water Leak
+    description: >
+      A pipe union weeps under the floor: zone 1 locates the leak at 34 m,
+      the operator acknowledges, and the leak is mopped up.
+    steps:
+      - at: 0
+        action: set_point
+        point: zone_1_leak_distance
+        value: 34.0
+      - at: 0
+        action: set_point
+        point: active_alarm_count
+        value: 1.0
+      - at: 20
+        action: set_point
+        point: alarm_acknowledged
+        value: true
+      - at: 90
+        action: set_point
+        point: zone_1_leak_distance
+        value: 0.0
+      - at: 90
+        action: set_point
+        point: active_alarm_count
+        value: 0.0
+      - at: 95
+        action: set_point
+        point: alarm_acknowledged
+        value: false
+
+  - id: two-simultaneous-leaks
+    name: Two Simultaneous Leaks
+    description: >
+      Both circuits go into alarm at different distances. Tests that a BMS
+      keeps one alarm from masking the other.
+    steps:
+      - at: 0
+        action: set_point
+        point: zone_1_leak_distance
+        value: 12.0
+      - at: 8
+        action: set_point
+        point: zone_2_leak_distance
+        value: 61.0
+      - at: 8
+        action: set_point
+        point: active_alarm_count
+        value: 2.0
+      - at: 120
+        action: set_point
+        point: zone_1_leak_distance
+        value: 0.0
+      - at: 120
+        action: set_point
+        point: zone_2_leak_distance
+        value: 0.0
+      - at: 120
+        action: set_point
+        point: active_alarm_count
+        value: 0.0
+
+  - id: cable-break
+    name: Sense Cable Break
+    description: >
+      Zone 2 sense cable is cut during floor work: supervision fails while
+      zone 1 keeps detecting. Tests fault versus leak handling.
+    steps:
+      - at: 0
+        action: set_point
+        point: zone_2_cable_fault
+        value: true
+      - at: 0
+        action: set_point
+        point: panel_ok
+        value: false
+      - at: 0
+        action: set_point
+        point: active_alarm_count
+        value: 1.0
+      - at: 120
+        action: set_point
+        point: zone_2_cable_fault
+        value: false
+      - at: 120
+        action: set_point
+        point: panel_ok
+        value: true
+      - at: 120
+        action: set_point
+        point: active_alarm_count
+        value: 0.0

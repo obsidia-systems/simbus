@@ -1,24 +1,27 @@
 # simbus — Industrial Field Device Simulator
 #
-# Runs a full lab of 7 virtual Modbus TCP devices, each in its own container.
-# Every container exposes:
-#   - A Modbus TCP server  (port 50xx on the host)
-#   - A REST control API   (port 80xx on the host)
+# One container = one process = one device YAML.
+# Every service has a profile. Bare `docker compose up` starts nothing.
 #
-# Usage:
-#   docker compose up                        # all devices
-#   docker compose up tnh-sensor crac        # specific devices
-#   docker compose up --profile power        # power-related group
+#   docker compose --profile all up          # 7 builtin + 4 Papouch (11)
+#   docker compose up tnh-sensor crac        # named services (no profile needed)
+#   docker compose --profile power up        # UPS + PDU + power-meter
+#   docker compose --profile env up          # T&H + leak + door
+#   docker compose --profile cooling up      # CRAC
+#   docker compose --profile custom up       # Papouch TH2E × 4
 #
-# Port map:
-#   tnh-sensor    Host 5020 -> Container 502    API 8000 -> 8000
-#   ups           Host 5021 -> Container 502    API 8001 -> 8000
-#   pdu           Host 5022 -> Container 502    API 8002 -> 8000
-#   crac          Host 5023 -> Container 502    API 8003 -> 8000
-#   power-meter   Host 5024 -> Container 502    API 8004 -> 8000
-#   leak-sensor   Host 5025 -> Container 502    API 8005 -> 8000
-#   door-contact  Host 5026 -> Container 502    API 8006 -> 8000
-#   papouch-th2e  Host 551x -> Container 512    API 810x -> 8000
+# Port map (host -> container):
+#   tnh-sensor       5020 -> 502    API 8000 -> 8000
+#   ups              5021 -> 502    API 8001 -> 8000
+#   pdu              5022 -> 502    API 8002 -> 8000
+#   crac             5023 -> 502    API 8003 -> 8000
+#   power-meter      5024 -> 502    API 8004 -> 8000
+#   leak-sensor      5025 -> 502    API 8005 -> 8000
+#   door-contact     5026 -> 502    API 8006 -> 8000
+#   papouch-th2e-01  5512 -> 512    API 8100 -> 8000
+#   papouch-th2e-02  5513 -> 512    API 8101 -> 8000
+#   papouch-th2e-03  5514 -> 512    API 8102 -> 8000
+#   papouch-th2e-04  5515 -> 512    API 8103 -> 8000
 
 x-simbus-defaults: &simbus-defaults
   build:
@@ -26,8 +29,26 @@ x-simbus-defaults: &simbus-defaults
     dockerfile: Dockerfile
     target: runtime
   restart: unless-stopped
+  user: "65532:65532"
+  read_only: true
+  cap_drop:
+    - ALL
   cap_add:
-    - NET_BIND_SERVICE
+    - NET_BIND_SERVICE   # YAML field ports 502 / 512 are privileged
+  security_opt:
+    - no-new-privileges:true
+  pids_limit: 64
+  init: true
+  logging:
+    driver: json-file
+    options:
+      max-size: "10m"
+      max-file: "3"
+  deploy:
+    resources:
+      limits:
+        memory: 128M
+        cpus: "1.0"
   networks:
     - simbus
 
@@ -39,7 +60,7 @@ services:
     <<: *simbus-defaults
     container_name: simbus-tnh-sensor
     environment:
-      SIMBUS_DEVICE_TYPE: generic-tnh-sensor
+      SIMBUS_YAML_PATH: /app/devices/builtin/generic-tnh-sensor.yaml
       SIMBUS_TICK_INTERVAL: "1.0"
     ports:
       - "5020:502"    # Modbus TCP
@@ -50,7 +71,7 @@ services:
     <<: *simbus-defaults
     container_name: simbus-leak-sensor
     environment:
-      SIMBUS_DEVICE_TYPE: generic-leak-sensor
+      SIMBUS_YAML_PATH: /app/devices/builtin/generic-leak-sensor.yaml
       SIMBUS_TICK_INTERVAL: "1.0"
     ports:
       - "5025:502"
@@ -61,7 +82,7 @@ services:
     <<: *simbus-defaults
     container_name: simbus-door-contact
     environment:
-      SIMBUS_DEVICE_TYPE: generic-door-contact
+      SIMBUS_YAML_PATH: /app/devices/builtin/generic-door-contact.yaml
       SIMBUS_TICK_INTERVAL: "1.0"
     ports:
       - "5026:502"
@@ -74,7 +95,7 @@ services:
     <<: *simbus-defaults
     container_name: simbus-crac
     environment:
-      SIMBUS_DEVICE_TYPE: generic-crac
+      SIMBUS_YAML_PATH: /app/devices/builtin/generic-crac.yaml
       SIMBUS_TICK_INTERVAL: "1.0"
     ports:
       - "5023:502"
@@ -87,7 +108,7 @@ services:
     <<: *simbus-defaults
     container_name: simbus-ups
     environment:
-      SIMBUS_DEVICE_TYPE: generic-ups
+      SIMBUS_YAML_PATH: /app/devices/builtin/generic-ups.yaml
       SIMBUS_TICK_INTERVAL: "1.0"
     ports:
       - "5021:502"
@@ -98,7 +119,7 @@ services:
     <<: *simbus-defaults
     container_name: simbus-pdu
     environment:
-      SIMBUS_DEVICE_TYPE: generic-pdu
+      SIMBUS_YAML_PATH: /app/devices/builtin/generic-pdu.yaml
       SIMBUS_TICK_INTERVAL: "1.0"
     ports:
       - "5022:502"
@@ -109,21 +130,21 @@ services:
     <<: *simbus-defaults
     container_name: simbus-power-meter
     environment:
-      SIMBUS_DEVICE_TYPE: generic-power-meter
+      SIMBUS_YAML_PATH: /app/devices/builtin/generic-power-meter.yaml
       SIMBUS_TICK_INTERVAL: "1.0"
     ports:
       - "5024:502"
       - "8004:8000"
     profiles: ["power", "all"]
 
-  # -- Custom device example (uncomment to enable) --------------------------------
+  # ── Community example: Papouch TH2E (profile custom or all) ───────────────
   papouch-th2e-01:
     <<: *simbus-defaults
     container_name: simbus-papouch-th2e-01
     volumes:
-    - ./devices:/app/devices:ro   # monta en tiempo de ejecución, sin rebuild
+    - ./devices:/app/devices:ro   # mount at runtime, no rebuild needed
     environment:
-      SIMBUS_YAML_PATH: "/app/devices/papouch-th2e.yaml"
+      SIMBUS_YAML_PATH: /app/devices/community/papouch-th2e.yaml
     ports:
       - "5512:512"
       - "8100:8000"
@@ -133,9 +154,9 @@ services:
     <<: *simbus-defaults
     container_name: simbus-papouch-th2e-02
     volumes:
-    - ./devices:/app/devices:ro   # monta en tiempo de ejecución, sin rebuild
+    - ./devices:/app/devices:ro   # mount at runtime, no rebuild needed
     environment:
-      SIMBUS_YAML_PATH: "/app/devices/papouch-th2e.yaml"
+      SIMBUS_YAML_PATH: /app/devices/community/papouch-th2e.yaml
     ports:
       - "5513:512"
       - "8101:8000"
@@ -145,9 +166,9 @@ services:
     <<: *simbus-defaults
     container_name: simbus-papouch-th2e-03
     volumes:
-    - ./devices:/app/devices:ro   # monta en tiempo de ejecución, sin rebuild
+    - ./devices:/app/devices:ro   # mount at runtime, no rebuild needed
     environment:
-      SIMBUS_YAML_PATH: "/app/devices/papouch-th2e.yaml"
+      SIMBUS_YAML_PATH: /app/devices/community/papouch-th2e.yaml
     ports:
       - "5514:512"
       - "8102:8000"
@@ -157,9 +178,9 @@ services:
     <<: *simbus-defaults
     container_name: simbus-papouch-th2e-04
     volumes:
-    - ./devices:/app/devices:ro   # monta en tiempo de ejecución, sin rebuild
+    - ./devices:/app/devices:ro   # mount at runtime, no rebuild needed
     environment:
-      SIMBUS_YAML_PATH: "/app/devices/papouch-th2e.yaml"
+      SIMBUS_YAML_PATH: /app/devices/community/papouch-th2e.yaml
     ports:
       - "5515:512"
       - "8103:8000"

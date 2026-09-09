@@ -1,82 +1,50 @@
-# ── Stage 1: dependency resolver ────────────────────────────────────────────
-# uv is used only here; the runtime image stays uv-free.
-FROM python:3.14-slim AS builder
+# ── Stage 1: build a static musl binary ──────────────────────────────────────
+FROM rust:1-alpine AS builder
 
-ENV PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1 \
-    UV_LINK_MODE=copy
+RUN apk add --no-cache build-base musl-dev curl zip unzip
 
-COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
+# utoipa-swagger-ui embeds the Swagger UI dist verbatim in .rodata. The upstream
+# zip carries source maps and duplicate ES bundles that the served page never
+# requests — roughly 10 MB of dead weight in the binary. Repack without them.
+# Keep this version in step with SWAGGER_UI_DOWNLOAD_URL_DEFAULT in the crate's
+# build.rs; a mismatch silently ships a different Swagger UI than a local build.
+ARG SWAGGER_UI_VERSION=5.17.14
+RUN mkdir -p /opt/swagger && cd /opt/swagger && \
+    curl -sSLo swagger.zip "https://github.com/swagger-api/swagger-ui/archive/refs/tags/v${SWAGGER_UI_VERSION}.zip" && \
+    unzip -q swagger.zip && rm swagger.zip && \
+    find "swagger-ui-${SWAGGER_UI_VERSION}/dist" \
+        \( -name '*.map' -o -name '*es-bundle*' \) -delete && \
+    zip -qr /opt/swagger-ui-slim.zip "swagger-ui-${SWAGGER_UI_VERSION}"
+ENV SWAGGER_UI_DOWNLOAD_URL="file:///opt/swagger-ui-slim.zip"
 
 WORKDIR /app
+COPY Cargo.toml Cargo.lock rust-toolchain.toml rustfmt.toml ./
+COPY crates ./crates
+COPY devices ./devices
 
-# Layer A: resolve & install dependencies (cached unless lock file changes)
-COPY pyproject.toml uv.lock ./
-RUN uv sync --frozen --no-dev --no-install-project
-
-# Layer B: copy source and install the project package itself
-# README.md is required by hatchling to build the package metadata.
-COPY README.md ./
-COPY simbus/ ./simbus/
-RUN uv sync --frozen --no-dev
-
+RUN cargo build --release -p simbus
 
 # ── Stage 2: runtime image ───────────────────────────────────────────────────
-FROM python:3.14-slim AS runtime
-
-ENV PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1 \
-    PATH="/app/.venv/bin:$PATH" \
-    # Defaults — override via env vars or docker-compose
-    SIMBUS_DEVICE_TYPE="generic-tnh-sensor" \
-    SIMBUS_API_PORT="8000" \
-    SIMBUS_TICK_INTERVAL="1.0"
+# musl targets link statically, so the runtime needs no libc. distroless/static
+# supplies only CA certificates, tzdata and the nonroot (65532) passwd entry.
+FROM gcr.io/distroless/static-debian12:nonroot AS runtime
 
 WORKDIR /app
+COPY --from=builder /app/target/release/simbus /usr/local/bin/simbus
+COPY --from=builder /app/devices /app/devices
 
-# Non-root user — reduces attack surface
-RUN groupadd --system simbus && \
-    useradd --system --gid simbus --no-create-home simbus
+ENV SIMBUS_API_PORT="8000" \
+    SIMBUS_TICK_INTERVAL="1.0"
 
-# Copy only runtime artifacts from the builder
-COPY --from=builder --chown=simbus:simbus /app/.venv /app/.venv
-COPY --from=builder --chown=simbus:simbus /app/simbus /app/simbus
+EXPOSE 8000 502
 
-USER simbus
-
-# REST API
-EXPOSE 8000
-# Modbus TCP — clients connect here
-EXPOSE 502
-
+# No shell in this image: `simbus ctl` is the health probe. It reads
+# SIMBUS_API_PORT itself, so an API port override still probes the right port.
 HEALTHCHECK \
     --interval=15s \
     --timeout=5s \
     --start-period=15s \
     --retries=3 \
-    CMD python -c \
-        "import urllib.request, os; \
-         urllib.request.urlopen( \
-             'http://localhost:' + os.getenv('SIMBUS_API_PORT','8000') + '/status' \
-         )"
+    CMD ["/usr/local/bin/simbus", "ctl", "healthz"]
 
-# Start through the simbus CLI so logging and runtime behavior stay consistent
-# across local runs, tests, and containers.
-CMD ["/bin/sh", "-c", "\
-PORT_ARG=\"\"; \
-if [ -n \"${SIMBUS_MODBUS_PORT:-}\" ]; then PORT_ARG=\"--port ${SIMBUS_MODBUS_PORT}\"; fi; \
-if [ -n \"${SIMBUS_YAML_PATH:-}\" ]; then \
-  exec simbus \
-    --file \"${SIMBUS_YAML_PATH}\" \
-    --api-port \"${SIMBUS_API_PORT:-8000}\" \
-    --host \"${SIMBUS_API_HOST:-0.0.0.0}\" \
-    --tick \"${SIMBUS_TICK_INTERVAL:-1.0}\" \
-    ${PORT_ARG}; \
-else \
-  exec simbus \
-    --type \"${SIMBUS_DEVICE_TYPE:-generic-tnh-sensor}\" \
-    --api-port \"${SIMBUS_API_PORT:-8000}\" \
-    --host \"${SIMBUS_API_HOST:-0.0.0.0}\" \
-    --tick \"${SIMBUS_TICK_INTERVAL:-1.0}\" \
-    ${PORT_ARG}; \
-fi"]
+ENTRYPOINT ["/usr/local/bin/simbus"]

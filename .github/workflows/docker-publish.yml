@@ -9,10 +9,12 @@
 #   linux/arm64 → ubuntu-24.04-arm   (GitHub-hosted Graviton / Apple M equivalent)
 #
 # Triggers:
-#   tag v* from main  → :1.2.3, :1.2, :latest, :sha-<short>
-#   pull request      → build-only validation, no push
+#   tag v* whose commit is on origin/main  → :X.Y.Z, :X.Y, :latest, :sha-<short>
+#   pull request to main (release cut)     → build-only validation, no push
+#   Feature PRs to develop do not run this workflow (CI is the PR gate).
 #
-# Tags pushed from any branch other than main are rejected (job-level condition).
+# Tag commits that are not ancestors of origin/main fail the "tag is on main"
+# step (do not use github.event.base_ref; it is empty on tag pushes).
 # latest always points to the most recently published version tag.
 
 name: Build and publish Docker image
@@ -36,11 +38,9 @@ jobs:
       contents: read
       packages: write
 
-    # On tag pushes: only proceed if the tag was created from main.
-    # On pull requests: always build (validation only, no push).
     if: >-
       github.event_name == 'pull_request' ||
-      github.event.base_ref == 'refs/heads/main'
+      startsWith(github.ref, 'refs/tags/')
 
     strategy:
       fail-fast: false
@@ -56,6 +56,15 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Tag must be on main
+        if: github.event_name != 'pull_request'
+        run: |
+          set -euo pipefail
+          git fetch origin main
+          git merge-base --is-ancestor "$GITHUB_SHA" origin/main
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -108,7 +117,7 @@ jobs:
     needs: build
     if: >-
       github.event_name != 'pull_request' &&
-      github.event.base_ref == 'refs/heads/main'
+      startsWith(github.ref, 'refs/tags/')
     permissions:
       contents: read
       packages: write
