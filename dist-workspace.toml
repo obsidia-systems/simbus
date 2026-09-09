@@ -15,9 +15,9 @@ hosting = "github"
 install-path = "CARGO_HOME"
 install-updater = false
 pr-run-mode = "plan"
-# Path is relative to `.github/workflows/` (cargo-dist injects this into
-# build jobs). Repo file is `ci/dist-assert-main.yml`.
-github-build-setup = "../ci/dist-assert-main.yml"
+# Path is relative to `.github/workflows/` (cargo-dist joins it onto that
+# directory). One `../` lands in `.github/`, not the repo root.
+github-build-setup = "ci/dist-assert-main.yml"
 
 [dist.github-custom-runners]
 global = "ubuntu-latest"

@@ -182,10 +182,9 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Fixed
 
-- Release workflow `dist plan` on a PR looked for `github-build-setup` at
-  `.github/workflows/ci/dist-assert-main.yml`. The path is relative to
-  `.github/workflows/`; `dist-workspace.toml` now points at
-  `../ci/dist-assert-main.yml` (repo `ci/dist-assert-main.yml`).
+- Release workflow `dist plan` loads `github-build-setup` relative to
+  `.github/workflows/` (one `../` is `.github/`, not the repo root). The
+  gate file lives at `.github/workflows/ci/dist-assert-main.yml`.
 
 ### Removed
 
