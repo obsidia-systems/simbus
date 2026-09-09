@@ -78,6 +78,49 @@ GET (including SSE) is not keyed. Missing/wrong key on a write MUST 401.
 
 ## 3. Endpoints
 
+The whole surface on one page. Four groups, and the group tells you what a
+route can do: discovery never mutates, `registers` / `points` reach one cell,
+`simulation` / `faults` reach the clock and the overrides, `scenarios` replay
+a sequence. Every `PATCH`, `POST`, and `DELETE` below needs `x-api-key` when
+`SIMBUS_API_KEY` is set (§2); no `GET` ever does, SSE included.
+
+```mermaid
+mindmap
+  root((simbus HTTP 8000))
+    Discovery
+      ["GET /status — live ports, tick, running"]
+      ["GET /config — document, bindings, scenarios"]
+      ["GET /healthz — liveness"]
+      ["GET /readyz — listeners up and running"]
+      ["GET /metrics — Prometheus text"]
+      ["GET /docs + /api-docs/openapi.json"]
+    Registers and points
+      ["GET /registers — raw snapshot"]
+      ["PATCH /registers/{address} — holding"]
+      ["PATCH /registers/input|coils|discrete/{address}"]
+      ["GET /registers/stream — SSE"]
+      ["GET /points, GET /points/{id}"]
+      ["PATCH /points/{id} — engineering value"]
+      ["GET /points/stream — SSE"]
+    Simulation and faults
+      ["PATCH /simulation — tick_interval, running"]
+      ["POST /simulation/reset — back to boot"]
+      ["GET /faults — active, with TTL"]
+      ["POST /faults — inject"]
+      ["DELETE /faults — clear all"]
+    Scenarios
+      ["GET /scenarios — bundled plus session"]
+      ["POST /scenarios — install a session copy"]
+      ["DELETE /scenarios/{name} — session only"]
+      ["POST /scenarios/{name}/run"]
+      ["GET /scenarios/active — runner status"]
+      ["POST /scenarios/stop"]
+```
+
+There is deliberately no route that creates a point, a register, or a
+binding: the loaded document is the map, and the only thing a session can
+add is a scenario ([spec.md](spec.md) §2).
+
 ### Discovery
 
 | Method | Path | Notes |

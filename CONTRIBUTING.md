@@ -18,9 +18,40 @@ There are no `release/*` branches. Cutting a version is a PR `develop` → `main
 then an annotated tag `vX.Y.Z` on that `main` commit. Do not tag `develop` or
 a feature branch.
 
-```text
-feature/foo  ──PR──►  develop  ──PR──►  main  ──tag vX.Y.Z──►  GHCR + GitHub Release
+One change, from branch to published tag:
+
+```mermaid
+gitGraph
+   commit id: "shipped 0.2.0" tag: "v0.2.0"
+   branch develop
+   checkout develop
+   commit id: "unreleased work"
+   branch feature/my-device
+   checkout feature/my-device
+   commit id: "docs first"
+   commit id: "crate + tests"
+   checkout develop
+   merge feature/my-device id: "PR to develop"
+   commit id: "release 0.3.0"
+   checkout main
+   merge develop id: "PR to main" tag: "v0.3.0"
+   checkout develop
+   merge main id: "back-merge"
+   commit id: "bump to next version"
 ```
+
+Only the commit on `main` carries a tag, and the tag is what publishes: it
+triggers the GHCR image and the GitHub Release with the `simbus` archives.
+That is why a tag on `develop` or on a feature branch is not just untidy —
+those workflows refuse it.
+
+The last two steps are easy to forget. After the tag, merge `main` back into
+`develop` and bump `develop` to the **next** version, so `develop` never
+claims a version that is already published ([AGENTS.md](AGENTS.md) §
+Release).
+
+A `hotfix/<slug>` is the same picture rotated: branch from `main`, PR to
+`main`, tag there, then merge `main` back into `develop`.
 
 ## Pull requests
 

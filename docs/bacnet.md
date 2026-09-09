@@ -78,7 +78,56 @@ Official maps under `devices/builtin/` MUST NOT declare this binding
 | Priority_Array | last-write-wins (no 16-level commandability) |
 
 `--bacnet-port` / `SIMBUS_BACNET_PORT` MAY override the port. It MUST NOT
-enable BACnet unless the document already has `bacnet-ip`.
+enable BACnet unless the document already has `bacnet-ip`. 47808 is `0xBAC0`,
+and the convention is that additional networks take 47809, 47810, … — so a
+port override moves this device to another BACnet **network**, not just to
+another socket.
+
+### 2.1 On the wire
+
+Every frame is BVLC over UDP, then an NPDU, then the APDU. Discovery is one
+8-byte broadcast — an unlimited Who-Is carries no parameters at all, which is
+why any device on the subnet must answer it:
+
+```mermaid
+packet-beta
+title "Who-Is (unlimited): BVLC + NPDU + unconfirmed APDU, 8 bytes"
+0-7: "BVLC Type = 0x81"
+8-15: "Function = 0x0B (Original-Broadcast-NPDU)"
+16-31: "BVLC Length = 8"
+32-39: "NPDU Version = 0x01"
+40-47: "NPDU Control = 0x00"
+48-55: "APDU Type = 0x10 (Unconfirmed-Request)"
+56-63: "Service Choice = 0x08 (Who-Is)"
+```
+
+A ReadProperty of `Present_Value` on Analog Input 1 is 17 bytes. The object
+is named by a single 32-bit identifier — 10 bits of object type, 22 bits of
+instance — so `analog-input` instance 1 is `0x00000001`, and the `export`
+row in the device YAML is what decides those 32 bits:
+
+```mermaid
+packet-beta
+title "ReadProperty AI:1 Present_Value, 17 bytes"
+0-7: "BVLC Type = 0x81"
+8-15: "Function = 0x0A (Original-Unicast-NPDU)"
+16-31: "BVLC Length = 17"
+32-39: "NPDU Version = 0x01"
+40-47: "NPDU Control = 0x04 (expecting reply)"
+48-55: "APDU Type = 0x00 (Confirmed-Request)"
+56-63: "Max segments / Max APDU"
+64-71: "Invoke Id"
+72-79: "Service Choice = 0x0C (ReadProperty)"
+80-87: "Context tag 0, length 4"
+88-119: "Object Identifier: type 0 (AI), instance 1"
+120-127: "Context tag 1, length 1"
+128-135: "Property Identifier = 85 (Present_Value)"
+```
+
+The `Invoke Id` is what pairs the ComplexACK with this request; nothing in
+the frame carries the device instance, because unicast already identified the
+device. That is also why a wrong `device_instance` in the YAML is invisible
+on a read and only shows up in discovery.
 
 ---
 

@@ -31,6 +31,39 @@ or registers and coils (language 1).
 A scenario that names `on_battery_alarm` on a UPS whose coil is `on_battery`
 MUST fail check — it MUST NOT fail silently at run time.
 
+`heat-wave`, bundled on `devices/builtin/generic-tnh-sensor.yaml`, is the
+one to read first. Each bar is how long the value written by that step is
+what a poller sees:
+
+```mermaid
+gantt
+    title heat-wave (generic T&H) on the simulation clock
+    dateFormat X
+    axisFormat %Ss
+    tickInterval 5second
+    section temperature
+    22.0 C                          :0, 2
+    25.0 C                          :2, 5
+    30.0 C (high_temp_alarm fires)  :active, 5, 10
+    35.0 C (held after the run)     :active, 10, 50
+    section faults
+    spike 42.0 C, duration_s 30     :crit, 12, 42
+    section clock
+    tick_interval 0.5 s             :done, 15, 45
+```
+
+Three things that plot makes concrete. The `spike` fault is the only step
+with a **length** (`duration_s: 30`): it ends at 42 s on its own, and the
+temperature underneath it is still 35 °C when it does. `high_temp_alarm` is
+never written by the scenario — it has a `trigger:` at 30 °C and fires by
+itself. And the last `set_point` is not an ending: 35 °C stays after the
+runner is done, so a test that expects the device to return to normal must
+either say so in a final step or `POST /simulation/reset`.
+
+The `tick_interval` bar is wall-clock plumbing, not physics: it makes the
+sampling finer for the spike window without changing the trajectory
+([simulation.md](simulation.md) §2).
+
 ```mermaid
 sequenceDiagram
     autonumber
@@ -67,6 +100,32 @@ The runner sorts steps by `at` (simulation seconds) and sleeps
 scale is 1 (1:1). Step types: `set_point`, `inject_fault`,
 `set_tick_interval`, plus the address-oriented `set_register` / `set_coil`
 that language-1 documents used — see spec.md.
+
+There is **one** runner per process, so every way of leaving `Running` ends
+in the same place:
+
+```mermaid
+stateDiagram-v2
+    [*] --> Idle: boot
+    Idle --> Running: POST /scenarios/{id}/run
+    Running --> Running: run another id (aborts the first)
+    Running --> Paused: PATCH /simulation running false
+    Paused --> Running: PATCH /simulation running true
+    Running --> Idle: last step applied
+    Running --> Idle: POST /scenarios/stop
+    Running --> Idle: DELETE the active session id
+    Paused --> Idle: POST /scenarios/stop
+```
+
+Two consequences that surprise people. Starting a second scenario does not
+queue it — it cancels the first mid-flight, and whatever the first had
+already written stays written. And `Paused` freezes the scenario's wall
+waits along with the tick, so a paused device does not silently burn through
+the rest of the timeline; `at:` stops advancing until you resume.
+
+Leaving `Running` never rewinds the device. Values written by the steps that
+already ran stay as they are: `POST /simulation/reset` is the only way back
+to boot state ([simulation.md](simulation.md) §6).
 
 ---
 

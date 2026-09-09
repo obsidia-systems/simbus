@@ -78,6 +78,47 @@ sequenceDiagram
     TCP-->>SCADA: MBAP echo unit id plus registers
 ```
 
+### 2.1 On the wire
+
+The 7-byte MBAP header (V1.0b §3.1) followed by the PDU. `FC3, start 0,
+quantity 2` — a two-register read of the T&H template — is 12 bytes:
+
+```mermaid
+packet-beta
+title "Modbus TCP request: MBAP + FC3 read holding, start 0, quantity 2"
+0-15: "Transaction Id (echoed)"
+16-31: "Protocol Id = 0x0000"
+32-47: "Length = 6 (bytes that follow)"
+48-55: "Unit Id"
+56-63: "FC = 0x03"
+64-79: "Starting Address = 0x0000"
+80-95: "Quantity = 0x0002"
+```
+
+`Length` counts the Unit Id byte and everything after it, so the framing is
+self-describing and a reader MUST NOT assume one PDU per TCP segment.
+`Starting Address` is the **PDU** address: datasheet element 40001 is
+address `0x0000` (§3). The response repeats the header, echoes the
+transaction id and the unit id, and prefixes the payload with a byte count —
+not a register count, which is the classic off-by-two when hand-decoding a
+capture:
+
+```mermaid
+packet-beta
+title "Modbus TCP response: byte count then 2 registers (22.5 °C, 45.0 %RH at scale 10)"
+0-15: "Transaction Id (echo)"
+16-31: "Protocol Id = 0x0000"
+32-47: "Length = 7"
+48-55: "Unit Id (echo)"
+56-63: "FC = 0x03"
+64-71: "Byte Count = 4"
+72-87: "Register 0 = 0x00E1 (225)"
+88-103: "Register 1 = 0x01C2 (450)"
+```
+
+Under TLS (§7) these same bytes travel inside the TLS record; nothing in the
+two diagrams changes.
+
 ---
 
 ## 3. Data model (V1.1b3 §4.3–4.4)
@@ -91,6 +132,31 @@ wire those are two independent registers. FC6 of either word is legal.
 `endianness` in the document is how the engine **interprets** the pair
 ([spec.md](spec.md) §3.3); V1.1b3 §4.2 only fixes big-endian **inside** one
 u16 (`0x1234` → `0x12 0x34`).
+
+Which word carries the high half is therefore a **document** decision, not a
+protocol one, and getting it wrong is the most common reason a float reads as
+a huge or tiny number instead of an obviously wrong one. Generic power meter
+`voltage_l1_n` (input register 0, `float32`, 230.4 V) is IEEE-754
+`0x43666666`. With `endianness: big` the high word goes first:
+
+```mermaid
+packet-beta
+title "float32 230.4 V at input 0-1, endianness: big (high word first)"
+0-15: "Address 0 = 0x4366"
+16-31: "Address 1 = 0x6666"
+```
+
+```mermaid
+packet-beta
+title "the same value, endianness: little (low word first)"
+0-15: "Address 0 = 0x6666"
+16-31: "Address 1 = 0x4366"
+```
+
+A client that reads two registers and reassembles them in the other order
+gets `0x66664366` — about 2.7 × 10²³ — so the failure is loud. Byte order
+**inside** each 16-bit word is fixed by V1.1b3 and is never affected by this
+setting: there is no byte-swapped (`0x66436666`) mode in this version.
 
 | YAML | Access on this plane | Functions |
 | --- | --- | --- |
@@ -159,7 +225,21 @@ Triggered coils MAY be written; the next tick overwrites them
 | 03 | ILLEGAL DATA VALUE | Quantity 0 or above the V1.1b3 max |
 | 04 | SERVER DEVICE FAILURE | Not used in this version |
 
-Exception PDU: request function + `0x80`, plus the code (V1.1b3 §4.1).
+Exception PDU: request function + `0x80`, plus the code (V1.1b3 §4.1). An
+exception is a **successful** MBAP exchange carrying a two-byte PDU, so a
+client MUST look at the function-code byte, not at the transport, to tell a
+refusal from a reply:
+
+```mermaid
+packet-beta
+title "Exception response to FC3: 0x03 | 0x80, code 02 ILLEGAL DATA ADDRESS"
+0-15: "Transaction Id (echo)"
+16-31: "Protocol Id = 0x0000"
+32-47: "Length = 3"
+48-55: "Unit Id (echo)"
+56-63: "FC = 0x83"
+64-71: "Code = 0x02"
+```
 
 ---
 

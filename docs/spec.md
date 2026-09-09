@@ -100,6 +100,52 @@ alarms: []
 scenarios: []
 ```
 
+The shape of that document, with the cardinality `simbus check` enforces.
+Read the crow's feet as "one document has many points"; the two relations
+that point **back** at `POINT` are name references, and every one of them is
+a validation error when the id does not exist (§8):
+
+```mermaid
+erDiagram
+    DOCUMENT ||--|{ POINT : "points:"
+    DOCUMENT ||--o{ BINDING : "bindings:"
+    DOCUMENT ||--o{ ALARM : "alarms:"
+    DOCUMENT ||--o{ SCENARIO : "scenarios:"
+    BINDING ||--|{ EXPORT_ROW : "export:"
+    EXPORT_ROW }o--|| POINT : "keyed by point id"
+    ALARM }o--|| POINT : "binary point name"
+    SCENARIO ||--|{ STEP : "steps:"
+    STEP }o--|| POINT : "point:"
+    POINT {
+        string id PK
+        string kind "analog or binary"
+        string class "input, value, output"
+        number default "engineering units"
+        object simulation "behavior, optional"
+        object trigger "binary only, optional"
+    }
+    BINDING {
+        string protocol PK
+        int port "protocol default"
+        string endianness "modbus-tcp only"
+        int device_instance "bacnet-ip only"
+    }
+    EXPORT_ROW {
+        string space "modbus: holding, input, coils, discrete"
+        int address "PDU address, 0 based"
+        string data_type "uint16, int16, uint32, float32"
+        int scale "raw = real x scale"
+        string object "bacnet: analog-input, binary-value, ..."
+        int instance "bacnet object instance"
+    }
+```
+
+One point can appear in several bindings — that is how the same channel is
+served over Modbus, OPC UA, and BACnet at once — but it needs **one row per
+binding**, because the address, the encoding, and the object identity are
+properties of the protocol, not of the point. A point in no `export` at all
+is legal and stays HTTP-only.
+
 Language **1** documents use top-level `modbus:` and `registers:` instead of
 `points:` / `export`. The loader lifts them to the same in-memory points.
 Do not mix `points:` and `registers:` in one file.
@@ -498,6 +544,46 @@ scenarios:
 | `steps` | list | yes | At least one. Order does not matter; the runner sorts by `at`. |
 
 Every step MUST have `action` and `at` (seconds from scenario start, ≥ 0).
+
+`at` is an **instant**, not a duration: a `set_point` takes effect at `at`
+and the value then stays until another step, a behavior, or a client moves
+it. The only step that carries a length of its own is `inject_fault`
+(`duration_s`). Several steps MAY share one `at` — that is how a scenario
+moves a whole device state at once, and it is why the file order of equal
+`at` values decides the winner when two of them write the same point.
+
+`power-outage`, bundled on `devices/builtin/generic-ups.yaml`, on the
+simulation clock. Each bar is the interval over which the value written by a
+step is the one a poller sees:
+
+```mermaid
+gantt
+    title power-outage (generic UPS) on the simulation clock
+    dateFormat X
+    axisFormat %M:%S
+    tickInterval 30second
+    section input_voltage
+    0.0 V (utility gone)      :crit, 0, 200
+    230.0 V (utility back)    :done, 200, 240
+    section output_source
+    5 = battery               :active, 0, 240
+    section battery_charge
+    80 %                      :5, 60
+    50 %                      :60, 120
+    18 % (low_battery fires)  :crit, 120, 180
+    4 % (battery_depleted)    :crit, 180, 240
+    section battery_runtime
+    30 min                    :60, 120
+    9 min                     :crit, 120, 240
+```
+
+Nothing in the scenario writes `on_battery`, `low_battery`, or
+`battery_depleted`. Those are binary points with a `trigger:` (§5.2) and
+they fire on their own as the analogs cross their thresholds: `on_battery`
+from `input_voltage < 180`, so at 0 s; `low_battery` from
+`battery_charge < 20`, so at 120 s; `battery_depleted` from
+`battery_charge < 5`, so at 180 s. A scenario drives the **analog** story
+and lets the alarm logic under test do its own work.
 
 Language 2 documents SHOULD use `set_point`. Language 1 `set_register` /
 `set_coil` remain valid against materialized names.

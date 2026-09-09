@@ -132,6 +132,21 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   state). README is the front door; contracts stay in `docs/`. Crate tests
   and the device-map table live in those pages; there are no crate or
   `devices/` README files.
+- The normative pages now plot the data they specify, not only the call
+  graph. `docs/simulation.md` §5 carries one chart per behavior, evaluated
+  from the formula in that section with the parameters a shipped map uses,
+  plus a fault window that shows `spike` / `freeze` / `dropout` /
+  `noise_amplify` expiring on their TTL, and two devices booted from one
+  `--seed` drawing different `phase_s`. `docs/modbus.md` draws the MBAP+PDU
+  request, response, and exception frames and the `float32` word order for
+  each `endianness`; `docs/bacnet.md` draws Who-Is and a ReadProperty APDU.
+  `docs/spec.md` §2 states the document cardinality as an ER diagram and §7
+  puts `power-outage` on the simulation clock; `docs/scenarios.md` does the
+  same for `heat-wave` and adds the runner state machine.
+  `docs/control.md` §3 opens with the whole route surface, and
+  `CONTRIBUTING.md` draws the branch model. Charts use the `-beta` diagram
+  aliases (`xychart-beta`, `packet-beta`), which parse on both Mermaid 10
+  and 11, and every chart keeps the normative table or formula next to it.
 - Tracing events from the Rust process: `simbus started` / `simbus stopping`,
   `api listening`, `modbus server listening`, `modbus tls listening`,
   `fault injected` / `expired` /

@@ -48,7 +48,9 @@ When an implementation changes a contract, CLI, HTTP route, device map, or
 authoring workflow, update **in the same change** every surface that still
 applies:
 
-- Normative docs in `docs/`
+- Normative docs in `docs/`. If the change moves a number, a frame, or a
+  timeline that a diagram shows, redraw it in the same change — allowed
+  diagram types and the Mermaid rules are in `docs/README.md` § Diagrams
 - `README.md` if the front door would become wrong
 - `CONTRIBUTING.md` if the branch model or PR target changed
 - `CHANGELOG.md` (`## [Unreleased]`). On a **release**, also bump every row
