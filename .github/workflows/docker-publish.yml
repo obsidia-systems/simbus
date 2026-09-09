@@ -10,7 +10,8 @@
 #
 # Triggers:
 #   tag v* whose commit is on origin/main  → :X.Y.Z, :X.Y, :latest, :sha-<short>
-#   pull request to develop or main        → build-only validation, no push
+#   pull request to main (release cut)     → build-only validation, no push
+#   Feature PRs to develop do not run this workflow (CI is the PR gate).
 #
 # Tag commits that are not ancestors of origin/main fail the "tag is on main"
 # step (do not use github.event.base_ref; it is empty on tag pushes).
@@ -22,7 +23,7 @@ on:
   push:
     tags: ["v*"]
   pull_request:
-    branches: [main, develop]
+    branches: [main]
 
 env:
   REGISTRY: ghcr.io

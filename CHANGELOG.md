@@ -174,7 +174,16 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   commit to be an ancestor of `origin/main`. Native binaries and a shell
   installer ship from `.github/workflows/release.yml` (`dist` 0.32). The
   binary Cargo package is `simbus` (`-p simbus`); the crate directory remains
-  `crates/runtime`.
+  `crates/runtime`. Feature PRs to `develop` run the **CI** workflow only.
+  `dist plan` and a Docker build-only check run on the `develop` → `main`
+  release PR; a `v*` tag on `main` publishes.
+
+### Fixed
+
+- Release workflow `dist plan` on a PR looked for `github-build-setup` at
+  `.github/workflows/ci/dist-assert-main.yml`. The path is relative to
+  `.github/workflows/`; `dist-workspace.toml` now points at
+  `../ci/dist-assert-main.yml` (repo `ci/dist-assert-main.yml`).
 
 ### Removed
 

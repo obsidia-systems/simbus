@@ -69,7 +69,11 @@ A `hotfix/<slug>` is the same picture rotated: branch from `main`, PR to
    cargo run -p simbus -- check devices/community/your-device.yaml
    ```
 
-5. Open the PR against **`develop`**, not `main`.
+5. Open the PR against **`develop`**, not `main`. GitHub Actions on that
+   PR is the **CI** workflow only (same five commands). Release (`dist`)
+   and GHCR do not run on feature PRs. `dist plan` and a Docker build-only
+   check run on the `develop` → `main` release PR; a `v*` tag on `main`
+   publishes.
 
 User-visible work goes under `CHANGELOG.md` `## [Unreleased]`. English for new
 code, comments, and docs.
