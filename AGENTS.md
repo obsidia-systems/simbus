@@ -77,9 +77,9 @@ cargo run -p simbus -- --file devices/builtin/generic-tnh-sensor.yaml
 CI is those five (fmt, clippy, test, `cargo deny`, `simbus check` on every
 `devices/**/*.yaml`). Do not add a Rust test per device YAML. GitHub runs
 that **CI** workflow on PRs and pushes to `develop` / `main`. Release
-(`dist`) and GHCR do not run on feature PRs: `dist plan` and a Docker
-build-only check run on the `develop` → `main` PR; a `v*` tag on `main`
-publishes.
+(`dist`) and GHCR run only on a `v*` tag whose commit is on `main`. After
+`dist generate`, strip `on.pull_request` from `release.yml` (`allow-dirty`
+includes `ci` so tag publish still works).
 
 ## Spec-first
 

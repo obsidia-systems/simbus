@@ -176,15 +176,17 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   commit to be an ancestor of `origin/main`. Native binaries and a shell
   installer ship from `.github/workflows/release.yml` (`dist` 0.32). The
   binary Cargo package is `simbus` (`-p simbus`); the crate directory remains
-  `crates/runtime`. Feature PRs to `develop` run the **CI** workflow only.
-  `dist plan` and a Docker build-only check run on the `develop` → `main`
-  release PR; a `v*` tag on `main` publishes.
+  `crates/runtime`. Feature PRs and the `develop` → `main` cut run the **CI**
+  workflow only. Release (`dist`) and GHCR publish on a `v*` tag on `main`.
 
 ### Fixed
 
 - Release workflow `dist plan` loads `github-build-setup` relative to
   `.github/workflows/` (one `../` is `.github/`, not the repo root). The
   gate file lives at `.github/workflows/ci/dist-assert-main.yml`.
+  `.github/workflows/release.yml` is regenerated with `dist generate`
+  (0.32.0); `on.pull_request` is stripped so Release and GHCR run only on
+  a version tag (`allow-dirty = ["ci"]`).
 
 ### Removed
 

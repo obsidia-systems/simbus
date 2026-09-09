@@ -14,7 +14,11 @@ targets = [
 hosting = "github"
 install-path = "CARGO_HOME"
 install-updater = false
-pr-run-mode = "plan"
+pr-run-mode = "skip"
+# `dist generate` always emits `on.pull_request`. That trigger is stripped
+# from `.github/workflows/release.yml` so Release runs only on version tags.
+# allow-dirty = ci lets `dist plan` / tag publish ignore that one edit.
+allow-dirty = ["ci"]
 # Path is relative to `.github/workflows/` (cargo-dist joins it onto that
 # directory). One `../` lands in `.github/`, not the repo root.
 github-build-setup = "ci/dist-assert-main.yml"
