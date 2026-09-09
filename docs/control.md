@@ -4,16 +4,17 @@
 **Device language:** [spec.md](spec.md)  
 **Process:** [runtime.md](runtime.md)  
 **Tick:** [simulation.md](simulation.md)  
-**Field plane:** [modbus.md](modbus.md)  
+**Field plane:** [modbus.md](modbus.md) · [opcua.md](opcua.md)  
 **Shape of the process:** [architecture.md](architecture.md)  
 **Interactive HTTP:** `GET /docs` (OpenAPI)
 
 The crate is named **control**, not `api`, because HTTP is only the
-transport. This process already has two wire faces:
+transport. This process already has three wire faces:
 
 | Plane | Crate | Role |
 | --- | --- | --- |
 | Field / data | `modbus` | SCADA reads and writes registers (FC1–FC16) |
+| Field / data | `opcua` | Same bank as OPC UA variables (IANA 4840) |
 | Control / session | `control` | Operator, tests, and GUIs mutate the live device |
 
 `api` would name the socket. **Control** names the job: session state on

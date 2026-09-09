@@ -4,10 +4,12 @@
 **Device language:** [spec.md](spec.md)  
 **Tick / `state.base`:** [simulation.md](simulation.md)  
 **Session HTTP:** [control.md](control.md)  
+**Sibling field plane:** [opcua.md](opcua.md)  
 **Process:** [runtime.md](runtime.md)  
 **Shape of the process:** [architecture.md](architecture.md)
 
-This crate is the **field plane**. It MUST implement the industry documents
+This crate is **one field plane** (Modbus TCP/TLS). OPC UA is the other
+([opcua.md](opcua.md)). It MUST implement the industry documents
 below. It MUST NOT invent quantity limits, exception codes, or addressing
 rules. It MUST NOT open the control HTTP port. It MUST NOT tick the engine.
 

@@ -2,8 +2,9 @@
 
 ## Industrial Field Device Simulator
 
-Simulate realistic Modbus TCP field devices for SCADA labs, integration testing,
-and operator training — **no hardware required**.
+Simulate realistic field devices for SCADA labs, integration testing,
+and operator training — **no hardware required**. Modbus TCP (optional TLS on
+802) and optional OPC UA on 4840.
 
 [![Rust 1.85+](https://img.shields.io/badge/rust-1.85+-DEA584?style=flat-square&logo=rust&logoColor=white)](https://www.rust-lang.org/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-yellow?style=flat-square)](LICENSE)
@@ -13,16 +14,18 @@ and operator training — **no hardware required**.
 [![axum](https://img.shields.io/badge/axum-0.8-009688?style=flat-square)](https://github.com/tokio-rs/axum)
 
 > **Each container = one device.** Field plane (Modbus TCP, optional TLS on 802, optional OPC UA on 4840) + simulation engine + REST control API.
-> Stack as many as you need. Works with Ignition, Wonderware, FactoryTalk, and any Modbus client.
+> Stack as many as you need. Works with Ignition, Wonderware, FactoryTalk, UA Expert, and any Modbus or OPC UA client.
 
 ```mermaid
 flowchart LR
     subgraph fleet [simbus fleet]
-        device[One process: Modbus plus HTTP]
+        device[One process: field plus HTTP]
     end
-    scada[SCADA Modbus TCP client]
+    scadaMb[SCADA Modbus]
+    scadaUa[SCADA OPC UA]
     gui[GUI or tests HTTP client]
-    scada -->|FC1 / FC3| device
+    scadaMb -->|FC1 / FC3| device
+    scadaUa -->|read / subscribe| device
     gui -->|REST / SSE| device
 ```
 
@@ -266,11 +269,13 @@ flowchart TB
     subgraph container [One container, one device]
         engine[engine tick loop]
         store[(RegisterBank)]
-        modbusNode[Modbus TCP]
+        modbusNode[Modbus TCP / TLS]
+        uaNode[OPC UA]
         api[HTTP control]
         scenario[ScenarioRunner]
         engine -->|writes every tick| store
         store --> modbusNode
+        store --> uaNode
         api --> store
         api --> engine
         api --> scenario
@@ -280,12 +285,13 @@ flowchart TB
     scada[SCADA]
     gui[GUI / tests]
     scada -->|FC1 to FC16| modbusNode
+    scada -->|read / write / subscribe| uaNode
     gui -->|REST and SSE| api
 ```
 
 Tick formulas live in [docs/simulation.md](docs/simulation.md). The tick loop,
-Modbus slave, and HTTP control plane share one `RegisterBank`. Scenarios are
-bundled in the device YAML.
+Modbus, OPC UA, and HTTP share one `RegisterBank`. OPC UA is spawned only
+when the YAML lists `protocol: opcua`. Scenarios are bundled in the device YAML.
 
 > [!NOTE]
 > ScenarioRunner stays idle until `POST /scenarios/{id}/run`. It does not run
@@ -449,7 +455,7 @@ sequenceDiagram
     Test->>API: POST /faults spike
     API->>Engine: inject_fault
     Note over Engine: next tick forces the register
-    Engine-->>SCADA: FC3 returns spiked raw
+    Engine-->>SCADA: FC3 or UA read returns spiked value
     Note over Engine: TTL expires
     Engine-->>SCADA: normal simulation resumes
 ```

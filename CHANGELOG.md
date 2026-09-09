@@ -80,7 +80,9 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   `modbus-tls` wraps that PDU in TLS (IANA 802); `/status.modbus_tls_port`
   is `null` when the document has no TLS binding. `/readyz` waits for every
   requested field listener. OPC UA on IANA 4840 is served when the YAML lists
-  `protocol: opcua` (`/status.opcua_port`).
+  `protocol: opcua` (`/status.opcua_port`). Architecture and README diagrams
+  show tick, Modbus, OPC UA, and HTTP on one bank (boot sequence, shutdown,
+  Docker lab).
 - Documentation map (`docs/README.md`) and architecture explanation
   (`docs/architecture.md`) with GitHub-safe Mermaid (flowchart, sequence,
   state). README is the front door; contracts stay in `docs/`. Crate tests

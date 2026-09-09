@@ -4,7 +4,7 @@
 **Device language:** [spec.md](spec.md)  
 **Process:** [runtime.md](runtime.md)  
 **HTTP session:** [control.md](control.md)  
-**Field plane:** [modbus.md](modbus.md)  
+**Field plane:** [modbus.md](modbus.md) · [opcua.md](opcua.md)  
 **Shape of the process:** [architecture.md](architecture.md)
 
 This document is the contract of **the tick**: time, `state.base`, behaviors,
@@ -232,7 +232,7 @@ Lookup on a numeric register: named fault, else `_device`.
 stateDiagram-v2
     [*] --> Live
     Live --> Frozen: inject freeze
-    Frozen --> Frozen: PATCH or FC6 updates base only
+    Frozen --> Frozen: PATCH, FC6, or OPC UA write updates base only
     Frozen --> Live: TTL expired
 ```
 

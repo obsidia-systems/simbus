@@ -1,6 +1,6 @@
 # Debt
 
-Work deferred after closing spec, runtime, engine, control, and modbus.
+Work deferred after closing spec, runtime, engine, control, modbus, and opcua.
 Not a product roadmap (MQTT, SNMP, BACnet live in [spec.md](spec.md) §4
 and the README timeline).
 
@@ -22,3 +22,14 @@ refuses). Serving those protocols is [spec.md](spec.md) §4, not this list.
 
 The Python 0.2.x tree (`simbus/`, `scenarios/`, `pyproject.toml`) is gone.
 Do not restore it.
+
+---
+
+## Value shapes (engine)
+
+Tick behaviors today: `constant`, `gaussian_noise`, `sinusoidal`, `drift`,
+`sawtooth`, `step` ([simulation.md](simulation.md)). Ignition's Programmable
+Device Simulator also ships cosine, square, triangle, uniform random
+min–max, a PID “realistic” walk, `list(...)`, and `qv` quality. Those are
+**not** YAML kinds yet. Do not add them until [simulation.md](simulation.md)
+and [spec.md](spec.md) §6 name them.

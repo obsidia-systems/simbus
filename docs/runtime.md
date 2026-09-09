@@ -219,15 +219,18 @@ sequenceDiagram
     participant RT as runtime
     participant T as tick task
     participant MB as modbus task
+    participant UA as opcua task
     participant HTTP as control task
     OS->>RT: SIGTERM
     RT->>RT: log simbus stopping
     RT->>HTTP: stop accept, drain in-flight
     RT->>MB: stop accept
+    RT->>UA: handle.cancel
     RT->>T: stop after current tick
     Note over RT: wait up to shutdown-timeout
     RT->>T: abort leftover
     RT->>MB: abort leftover
+    RT->>UA: abort leftover
     RT->>HTTP: abort leftover
     RT-->>OS: exit 0
 ```

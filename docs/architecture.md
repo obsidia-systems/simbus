@@ -144,27 +144,30 @@ sequenceDiagram
     participant RT as runtime
     participant Eng as engine
     participant MB as modbus
+    participant UA as opcua
     participant CTL as control
     Op->>RT: simbus --file device.yaml
     RT->>Eng: Device::new spec, seed, tick
-    RT->>MB: spawn serve and/or serve_tls
+    RT->>MB: spawn serve and/or serve_tls if YAML asked
+    RT->>UA: spawn serve if YAML asked
     RT->>CTL: spawn serve host, api_port
     RT->>RT: log simbus started
-    Note over MB,CTL: Tick loop publishes Snapshot on watch after every tick dt
+    Note over MB,UA,CTL: Tick loop publishes Snapshot on watch after every tick dt
 ```
 
 ---
 
 ## 4. Shared bank
 
-There is one `RegisterBank`. Tick writes it. Modbus and HTTP read and
-write it. SSE is a `watch` of snapshots; the engine never opens the SSE
-socket.
+There is one `RegisterBank`. Tick writes it. Modbus, OPC UA, and HTTP
+read and write it. SSE is a `watch` of snapshots; the engine never opens
+the SSE socket.
 
 ```mermaid
 flowchart LR
     tick[tick dt] --> bank[(RegisterBank)]
     mb[Modbus FC3 / FC6] --> bank
+    ua[OPC UA read / write] --> bank
     patch[PATCH /registers] --> bank
     bank --> sse[watch channel]
     sse --> stream[GET /registers/stream]
@@ -176,20 +179,21 @@ flowchart LR
 
 | Plane | Port | Client | Contract |
 | --- | --- | --- | --- |
-| Field | Modbus TCP | Ignition, PLC, protocol tester | [modbus.md](modbus.md) |
+| Field | Modbus TCP / TLS | Ignition, PLC, protocol tester | [modbus.md](modbus.md) |
+| Field | OPC UA (IANA 4840) | Ignition, UA Expert | [opcua.md](opcua.md) |
 | Session | HTTP | Operator, GUI, pytest | [control.md](control.md) |
 
-A FC6 is not an HTTP PATCH. `state.base` updates in both cases
-([simulation.md](simulation.md) §3). SSE publishes immediately on session
-writes and on the **next tick** after a Modbus write.
+A FC6, an OPC UA write, and an HTTP PATCH are three wires to the same
+`state.base` ([simulation.md](simulation.md) §3). SSE publishes immediately
+on session writes and on the **next tick** after a field-plane write.
 
 ---
 
 ## 6. Process lifecycle
 
 `is_running` is the pause flag (`PATCH /simulation` `running`). Tick is a
-no-op while paused. `/readyz` is 503 while paused. Modbus still serves the
-last bank.
+no-op while paused. `/readyz` is 503 while paused. Field listeners still
+serve the last bank.
 
 ```mermaid
 stateDiagram-v2
@@ -199,8 +203,8 @@ stateDiagram-v2
     Paused --> Running: PATCH running true
     Running --> Stopping: SIGINT or SIGTERM
     Paused --> Stopping: SIGINT or SIGTERM
-    Running --> Failed: Modbus or HTTP task died
-    Paused --> Failed: Modbus or HTTP task died
+    Running --> Failed: field listener or HTTP task died
+    Paused --> Failed: field listener or HTTP task died
     Stopping --> [*]: exit 0
     Failed --> [*]: exit non-zero
 ```
@@ -213,8 +217,10 @@ Shutdown **drains** then aborts leftover after `--shutdown-timeout`
 ## 7. Docker lab
 
 Each Compose service is one process, one YAML, one pair of published
-ports. Inside the container Modbus is usually `502` (Papouch `512`).
-Compose **must** set `SIMBUS_YAML_PATH`.
+ports (Modbus + HTTP). Official maps do not bind OPC UA; a lab that wants
+IANA 4840 adds `protocol: opcua` and publishes `4840`. Inside the
+container Modbus is usually `502` (Papouch `512`). Compose **must** set
+`SIMBUS_YAML_PATH`.
 
 Every service has a profile (`env`, `cooling`, `power`, `custom`, `all`).
 `docker compose up` with no names and no `--profile` starts nothing.
@@ -233,6 +239,7 @@ flowchart TB
         end
     end
     ign -->|Modbus host ports| tnh
+    ign -->|optional OPC UA 4840| tnh
     ign --> ups
     ign --> pdu
 ```
@@ -243,5 +250,6 @@ flowchart TB
 
 - YAML field tables → [spec.md](spec.md)
 - Function codes and exception 02 → [modbus.md](modbus.md)
+- OPC UA NodeIds and None/Anonymous → [opcua.md](opcua.md)
 - Route list → [control.md](control.md) and `GET /docs`
 - Behavior formulas → [simulation.md](simulation.md)

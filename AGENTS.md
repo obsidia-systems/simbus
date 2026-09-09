@@ -7,7 +7,7 @@ Documentation map: `llms.txt`.
 
 ## Product
 
-Industrial Modbus TCP/TLS field-device simulator. **One process = one device.**
+Industrial Modbus TCP/TLS and OPC UA field-device simulator. **One process = one device.**
 Binary name `simbus`. Crates: `spec`, `engine`, `control`, `modbus`, `opcua`,
 `runtime`.
 
