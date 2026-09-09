@@ -1,7 +1,7 @@
 # Architecture
 
 **Mode:** explanation (not a second copy of the YAML or HTTP tables)  
-**Contracts:** [spec.md](spec.md) · [runtime.md](runtime.md) · [modbus.md](modbus.md) · [opcua.md](opcua.md) · [control.md](control.md) · [simulation.md](simulation.md)
+**Contracts:** [spec.md](spec.md) · [runtime.md](runtime.md) · [modbus.md](modbus.md) · [opcua.md](opcua.md) · [bacnet.md](bacnet.md) · [control.md](control.md) · [simulation.md](simulation.md)
 
 simbus is one **process** that pretends to be one **field device**. A lab
 is many processes (Compose services), not one process with many maps.
@@ -17,27 +17,30 @@ GitHub renders the Mermaid below. Syntax follows current
 ## 1. Context
 
 Operators boot a YAML file. SCADA talks Modbus TCP (and optionally TLS on
-IANA 802 and/or OPC UA on IANA 4840) to the listen ports.
-Tests and GUIs talk HTTP to the control port. The planes share one
-in-memory bank; they are not two devices.
+IANA 802, OPC UA on IANA 4840, and/or BACnet/IP on IANA 47808) to the listen
+ports. Tests and GUIs talk HTTP to the control port. The planes share one
+in-memory bank; they are not several devices.
 
 ```mermaid
 flowchart LR
     subgraph lab [Laboratory]
-        scada[SCADA / Ignition]
+        scada[SCADA / Ignition / BMS]
         gui[GUI / curl / CI]
         subgraph proc [One simbus process]
             mb[Modbus TCP / TLS]
             ua[OPC UA]
+            bn[BACnet/IP]
             http[HTTP control]
             bank[(RegisterBank)]
             mb --- bank
             ua --- bank
+            bn --- bank
             http --- bank
         end
     end
     scada -->|FC1 to FC16 / UA read| mb
     scada --> ua
+    scada -->|Who-Is / RP / WP| bn
     gui -->|REST and SSE| http
 ```
 
@@ -58,19 +61,23 @@ flowchart TB
     control[control]
     modbusCrate[modbus]
     opcuaCrate[opcua]
+    bacnetCrate[bacnet]
     engine[engine]
     spec[spec]
     runtime --> control
     runtime --> modbusCrate
     runtime --> opcuaCrate
+    runtime --> bacnetCrate
     runtime --> engine
     control --> engine
     modbusCrate --> engine
     opcuaCrate --> engine
+    bacnetCrate --> engine
     engine --> spec
     control --> spec
     modbusCrate --> spec
     opcuaCrate --> spec
+    bacnetCrate --> spec
 ```
 
 | Crate | Owns | Must not |
@@ -79,6 +86,7 @@ flowchart TB
 | `engine` | Bank, `tick(dt)`, faults, steps | Sockets, SSE, health logs |
 | `modbus` | TCP / TLS slave, V1.1b3 PDU | HTTP, tick |
 | `opcua` | OPC UA server, YAML map as variables | HTTP, tick |
+| `bacnet` | BACnet/IP server, objects from `export` | HTTP, tick |
 | `control` | Session HTTP + SSE | Field listen |
 | `runtime` | CLI, boot, tick / field listeners / HTTP, signals | A second YAML dialect |
 
@@ -92,6 +100,7 @@ crate; contracts are in this folder):
 | `control` | `cargo test -p control` | `tests/http.rs` (probes, PATCH, faults, scenarios, API key, SSE) |
 | `modbus` | `cargo test -p modbus --locked` | FC1–FC4 / 5 / 6 / 15 / 16, exceptions 02 / 03, FC3 over TLS |
 | `opcua` | `cargo test -p opcua --locked` | T&H `holding/temperature` over Anonymous/None |
+| `bacnet` | `cargo test -p bacnet --locked` | Language-2 fixture: Who-Is, ReadProperty on an Analog Input, WriteProperty on an Analog Value |
 | `runtime` (`-p simbus`) | `cargo test -p simbus --locked` | clap (`--file`, `--tick`, `--time-scale`, `--seed`, TLS/UA flags, `check`, `ctl`); default template |
 
 Device YAML is validated with `simbus check`, not a Rust test per file.
@@ -100,7 +109,7 @@ On disk this is the whole product (no Python package, no `scenarios/` folder):
 
 ```text
 simbus/
-├── crates/{spec,engine,control,modbus,opcua,runtime}
+├── crates/{spec,engine,control,modbus,opcua,bacnet,runtime}
 ├── devices/{builtin,community}
 ├── docs/
 ├── Dockerfile
@@ -145,22 +154,24 @@ sequenceDiagram
     participant Eng as engine
     participant MB as modbus
     participant UA as opcua
+    participant BN as bacnet
     participant CTL as control
     Op->>RT: simbus --file device.yaml
     RT->>Eng: Device::new spec, seed, tick
     RT->>MB: spawn serve and/or serve_tls if YAML asked
     RT->>UA: spawn serve if YAML asked
+    RT->>BN: spawn serve if YAML asked
     RT->>CTL: spawn serve host, api_port
     RT->>RT: log simbus started
-    Note over MB,UA,CTL: Tick loop publishes Snapshot on watch after every tick dt
+    Note over MB,CTL: Tick loop publishes Snapshot on watch after every tick dt
 ```
 
 ---
 
 ## 4. Shared bank
 
-There is one `RegisterBank`. Tick writes it. Modbus, OPC UA, and HTTP
-read and write it. SSE is a `watch` of snapshots; the engine never opens
+There is one `RegisterBank`. Tick writes it. Modbus, OPC UA, BACnet/IP, and
+HTTP read and write it. SSE is a `watch` of snapshots; the engine never opens
 the SSE socket.
 
 ```mermaid
@@ -168,6 +179,7 @@ flowchart LR
     tick[tick dt] --> bank[(RegisterBank)]
     mb[Modbus FC3 / FC6] --> bank
     ua[OPC UA read / write] --> bank
+    bn[BACnet RP / WP] --> bank
     patch[PATCH /registers or /points] --> bank
     bank --> sse[watch channel]
     sse --> stream["GET /registers/stream or /points/stream"]
@@ -181,9 +193,10 @@ flowchart LR
 | --- | --- | --- | --- |
 | Field | Modbus TCP / TLS | Ignition, PLC, protocol tester | [modbus.md](modbus.md) |
 | Field | OPC UA (IANA 4840) | Ignition, UA Expert | [opcua.md](opcua.md) |
+| Field | BACnet/IP (IANA 47808) | BMS, YABE, protocol tester | [bacnet.md](bacnet.md) |
 | Session | HTTP | Operator, GUI, pytest | [control.md](control.md) |
 
-A FC6, an OPC UA write, and an HTTP PATCH are three wires to the same
+A FC6, an OPC UA write, a BACnet WriteProperty, and an HTTP PATCH are wires to the same
 `state.base` ([simulation.md](simulation.md) §3). SSE publishes immediately
 on session writes and on the **next tick** after a field-plane write.
 
@@ -217,8 +230,9 @@ Shutdown **drains** then aborts leftover after `--shutdown-timeout`
 ## 7. Docker lab
 
 Each Compose service is one process, one YAML, one pair of published
-ports (Modbus + HTTP). Official maps do not bind OPC UA; a lab that wants
-IANA 4840 adds `protocol: opcua` and publishes `4840`. Inside the
+ports (Modbus + HTTP). Official maps do not bind OPC UA or BACnet/IP; a lab
+that wants IANA 4840 adds `protocol: opcua` and publishes `4840`, and one that
+wants IANA 47808 adds `protocol: bacnet-ip` and publishes `47808/udp`. Inside the
 container Modbus is usually `502` (Papouch `512`). Compose **must** set
 `SIMBUS_YAML_PATH`.
 
@@ -251,5 +265,6 @@ flowchart TB
 - YAML field tables → [spec.md](spec.md)
 - Function codes and exception 02 → [modbus.md](modbus.md)
 - OPC UA NodeIds and None/Anonymous → [opcua.md](opcua.md)
+- BACnet object types and Present_Value → [bacnet.md](bacnet.md)
 - Route list → [control.md](control.md) and `GET /docs`
 - Behavior formulas → [simulation.md](simulation.md)

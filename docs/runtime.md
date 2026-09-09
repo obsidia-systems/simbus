@@ -4,7 +4,7 @@
 **Device language:** [spec.md](spec.md)  
 **HTTP session:** [control.md](control.md)  
 **Tick semantics:** [simulation.md](simulation.md)  
-**Field plane:** [modbus.md](modbus.md) · [opcua.md](opcua.md)  
+**Field plane:** [modbus.md](modbus.md) · [opcua.md](opcua.md) · [bacnet.md](bacnet.md)  
 **Shape of the process:** [architecture.md](architecture.md)
 
 This document is the contract of **the process**: one binary, one device,
@@ -26,7 +26,7 @@ The runtime MUST:
    ([spec.md](spec.md) §4 and §9).
 4. Instantiate the engine from that document.
 5. Start the tick loop, each requested field listener (Modbus TCP and/or
-   Modbus TLS and/or OPC UA), and the HTTP control plane.
+   Modbus TLS and/or OPC UA and/or BACnet/IP), and the HTTP control plane.
 6. Leave bundled scenarios **idle**.
 7. Exit on SIGINT or SIGTERM (see §6), or if a server task ends unexpectedly.
 
@@ -70,6 +70,10 @@ local JSON or YAML scenario file and POST JSON. It is an HTTP client
    - `opcua`: port from the binding (default 4840) then `--opcua-port` /
      `SIMBUS_OPCUA_PORT`. `--opcua-port` MUST NOT enable OPC UA unless the
      document has that binding.
+   - `bacnet-ip`: UDP port from the binding (default 47808) then
+     `--bacnet-port` / `SIMBUS_BACNET_PORT`, plus the YAML `device_instance`.
+     `--bacnet-port` MUST NOT enable BACnet unless the document has that
+     binding.
 7. `Device::new(spec, seed, tick)`. `set_running(true)`.
 8. Spawn tick, each field listener, API.
 9. Log `simbus started`. Block until shutdown (§6) or a task failure (§5).
@@ -127,6 +131,7 @@ All settings use the `SIMBUS_` prefix when set via the environment.
 | `--modbus-key` | `SIMBUS_MODBUS_KEY` | YAML `keyfile` | Override TLS server private key PEM path |
 | `--modbus-ca` | `SIMBUS_MODBUS_CA` | YAML `cafile` | Override optional client-CA PEM (mTLS) |
 | `--opcua-port` | `SIMBUS_OPCUA_PORT` | YAML (`4840` if omitted) | Override OPC UA listen port. Ignored unless the document has `opcua` |
+| `--bacnet-port` | `SIMBUS_BACNET_PORT` | YAML (`47808` if omitted) | Override BACnet/IP UDP port. Ignored unless the document has `bacnet-ip` |
 | `--name` / `-n` | `SIMBUS_DEVICE_NAME` | YAML `name` | Display name only |
 | `--api-port` | `SIMBUS_API_PORT` | `8000` | HTTP listen port |
 | `--host` | `SIMBUS_API_HOST` | `0.0.0.0` | HTTP bind address |
@@ -138,12 +143,14 @@ All settings use the `SIMBUS_` prefix when set via the environment.
 | `--api-key` | `SIMBUS_API_KEY` | — | If set, write endpoints require `x-api-key` or `Bearer` |
 | `--cors-origins` | `SIMBUS_CORS_ORIGINS` | `*` | Comma-separated origins |
 
-Modbus TCP, Modbus TLS, and OPC UA bind `0.0.0.0` on their resolved ports
-([modbus.md](modbus.md), [opcua.md](opcua.md)). There is no
-`SIMBUS_MODBUS_HOST` / `SIMBUS_OPCUA_HOST` in this version.
+Modbus TCP, Modbus TLS, OPC UA, and BACnet/IP bind `0.0.0.0` on their resolved
+ports ([modbus.md](modbus.md), [opcua.md](opcua.md), [bacnet.md](bacnet.md)).
+There is no `SIMBUS_MODBUS_HOST` / `SIMBUS_OPCUA_HOST` /
+`SIMBUS_BACNET_HOST` in this version.
 CLI/env TLS paths and ports do not rewrite the YAML and do not enable TLS
 unless the document already has a `modbus-tls` binding. `--opcua-port` does
-not enable OPC UA unless the document already has an `opcua` binding.
+not enable OPC UA unless the document already has an `opcua` binding, and
+`--bacnet-port` does not enable BACnet without a `bacnet-ip` binding.
 
 There is no `--type` / `SIMBUS_DEVICE_TYPE`.
 
@@ -220,17 +227,20 @@ sequenceDiagram
     participant T as tick task
     participant MB as modbus task
     participant UA as opcua task
+    participant BN as bacnet task
     participant HTTP as control task
     OS->>RT: SIGTERM
     RT->>RT: log simbus stopping
     RT->>HTTP: stop accept, drain in-flight
     RT->>MB: stop accept
     RT->>UA: handle.cancel
+    RT->>BN: stop server
     RT->>T: stop after current tick
     Note over RT: wait up to shutdown-timeout
     RT->>T: abort leftover
     RT->>MB: abort leftover
     RT->>UA: abort leftover
+    RT->>BN: abort leftover
     RT->>HTTP: abort leftover
     RT-->>OS: exit 0
 ```

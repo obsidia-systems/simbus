@@ -47,6 +47,17 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   register maps still load and are lifted to points. Session API `GET`/`PATCH
   /points/{id}` and `GET /points/stream` (`simbus ctl points` / `set-point`).
   OPC UA language 2 NodeIds are `ns=N;s={id}` under Input/Value/Output folders.
+  A language-2 document with no Modbus binding backs every point with a
+  private engine cell, so an OPC UA-only or BACnet-only map still has values.
+- BACnet/IP field plane: `protocol: bacnet-ip` serves the language-2 `export`
+  rows as Analog/Binary Input, Value, and Output objects on IANA **47808**
+  (`crates/bacnet`, `bacnet-server`). Who-Is/I-Am, ReadProperty and
+  WriteProperty on `Present_Value`; a write lands in the same bank as a
+  Modbus FC6 or an HTTP `PATCH /points/{id}`. `device_instance` and a
+  non-empty `export` are required; `--bacnet-port` / `SIMBUS_BACNET_PORT`
+  overrides the YAML port when the document binds BACnet. `/status` reports
+  `bacnet_port` (`null` without a binding) and `/readyz` waits for the
+  listener. Official builtin maps stay Modbus-only.
 - OPC UA field plane: `protocol: opcua` serves the same YAML map on IANA
   **4840** (`crates/opcua`, async-opcua, None + Anonymous). Dual-bind with
   Modbus TCP/TLS. Official builtin maps stay Modbus-only. `/status.opcua_port`

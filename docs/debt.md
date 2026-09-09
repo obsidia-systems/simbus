@@ -1,8 +1,8 @@
 # Debt
 
-Work deferred after closing spec, runtime, engine, control, modbus, and opcua.
-Not a product roadmap (MQTT, SNMP, BACnet live in [spec.md](spec.md) §4
-and the README timeline).
+Work deferred after closing spec, runtime, engine, control, modbus, opcua,
+and bacnet. Not a product roadmap (MQTT, SNMP, Modbus RTU live in
+[spec.md](spec.md) §4 and the README timeline).
 
 Index: [README.md](README.md). Architecture: [architecture.md](architecture.md).
 

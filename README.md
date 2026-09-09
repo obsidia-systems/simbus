@@ -4,7 +4,7 @@
 
 Simulate realistic field devices for SCADA labs, integration testing,
 and operator training — **no hardware required**. Modbus TCP (optional TLS on
-802) and optional OPC UA on 4840.
+802), optional OPC UA on 4840, and optional BACnet/IP on 47808.
 
 [![Rust 1.85+](https://img.shields.io/badge/rust-1.85+-DEA584?style=flat-square&logo=rust&logoColor=white)](https://www.rust-lang.org/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-yellow?style=flat-square)](LICENSE)
@@ -13,8 +13,8 @@ and operator training — **no hardware required**. Modbus TCP (optional TLS on
 [![tokio-modbus](https://img.shields.io/badge/tokio--modbus-0.17-blueviolet?style=flat-square)](https://github.com/slowtec/tokio-modbus)
 [![axum](https://img.shields.io/badge/axum-0.8-009688?style=flat-square)](https://github.com/tokio-rs/axum)
 
-> **Each container = one device.** Field plane (Modbus TCP, optional TLS on 802, optional OPC UA on 4840) + simulation engine + REST control API.
-> Stack as many as you need. Works with Ignition, Wonderware, FactoryTalk, UA Expert, and any Modbus or OPC UA client.
+> **Each container = one device.** Field plane (Modbus TCP, optional TLS on 802, optional OPC UA on 4840, optional BACnet/IP on 47808) + simulation engine + REST control API.
+> Stack as many as you need. Works with Ignition, Wonderware, FactoryTalk, UA Expert, YABE, and any Modbus, OPC UA, or BACnet client.
 
 ```mermaid
 flowchart LR
@@ -23,9 +23,11 @@ flowchart LR
     end
     scadaMb[SCADA Modbus]
     scadaUa[SCADA OPC UA]
+    bms[BMS BACnet/IP]
     gui[GUI or tests HTTP client]
     scadaMb -->|FC1 / FC3| device
     scadaUa -->|read / subscribe| device
+    bms -->|Who-Is / ReadProperty| device
     gui -->|REST / SSE| device
 ```
 
@@ -94,6 +96,7 @@ curl http://localhost:8000/status
   "modbus_port": 502,
   "modbus_tls_port": null,
   "opcua_port": null,
+  "bacnet_port": null,
   "tick_interval": 1.0,
   "time_scale": 1.0,
   "simulation": "running",
@@ -170,9 +173,50 @@ simbus --file device.yaml
 # UA Expert: opc.tcp://127.0.0.1:4840  (accept None / Anonymous)
 ```
 
-NodeIds are `ns=N;s=holding/{name}` (and `input/`, `coils/`, `discrete/`).
-Values are engineering units (T&H `holding/temperature` ≈ 22.5). Compose does
-not publish 4840 by default; add `4840:4840` when you want the lab.
+NodeIds are `ns=N;s={point-id}` under Input/Value/Output folders on a
+language-2 document, and `ns=N;s=holding/{name}` (plus `input/`, `coils/`,
+`discrete/`) on a language-1 register map. Values are engineering units (T&H
+temperature ≈ 22.5). Compose does not publish 4840 by default; add
+`4840:4840` when you want the lab.
+
+### BACnet/IP (IANA 47808)
+
+Builtin maps stay **Modbus TCP only**. To publish the same bank as BACnet
+objects, add a `bacnet-ip` binding on a language-2 document. `device_instance`
+and a non-empty `export` are required — objects are never inferred:
+
+```yaml
+points:
+  - id: temperature
+    kind: analog
+    class: input
+    unit: degC
+    default: 22.5
+  - id: setpoint
+    kind: analog
+    class: value
+    unit: degC
+    default: 21.0
+bindings:
+  - protocol: bacnet-ip
+    port: 47808
+    device_instance: 1001
+    export:
+      temperature: { object: analog-input, instance: 1 }
+      setpoint:    { object: analog-value, instance: 1 }
+```
+
+```bash
+simbus --file device.yaml --bacnet-port 47808
+# YABE / any BACnet explorer: Who-Is → device 1001, then ReadProperty
+# Present_Value on AI:1; WriteProperty on AV:1 moves the same value that
+# PATCH /points/setpoint does.
+```
+
+Present_Value is engineering REAL (analog) or Inactive/Active (binary).
+Who-Is/I-Am, ReadProperty, and WriteProperty are served; COV, BBMD, MS/TP,
+and BACnet/SC are not. Compose does not publish 47808; add `47808:47808/udp`
+when you want the lab.
 
 > [!NOTE]
 > **Requirements:** Rust 1.85+ (MSRV; edition 2024). Toolchain file tracks
@@ -271,11 +315,13 @@ flowchart TB
         store[(RegisterBank)]
         modbusNode[Modbus TCP / TLS]
         uaNode[OPC UA]
+        bnNode[BACnet/IP]
         api[HTTP control]
         scenario[ScenarioRunner]
         engine -->|writes every tick| store
         store --> modbusNode
         store --> uaNode
+        store --> bnNode
         api --> store
         api --> engine
         api --> scenario
@@ -286,12 +332,14 @@ flowchart TB
     gui[GUI / tests]
     scada -->|FC1 to FC16| modbusNode
     scada -->|read / write / subscribe| uaNode
+    scada -->|Who-Is / RP / WP| bnNode
     gui -->|REST and SSE| api
 ```
 
 Tick formulas live in [docs/simulation.md](docs/simulation.md). The tick loop,
-Modbus, OPC UA, and HTTP share one `RegisterBank`. OPC UA is spawned only
-when the YAML lists `protocol: opcua`. Scenarios are bundled in the device YAML.
+Modbus, OPC UA, BACnet/IP, and HTTP share one `RegisterBank`. OPC UA and
+BACnet/IP are spawned only when the YAML lists `protocol: opcua` or
+`protocol: bacnet-ip`. Scenarios are bundled in the device YAML.
 
 > [!NOTE]
 > ScenarioRunner stays idle until `POST /scenarios/{id}/run`. It does not run
@@ -554,6 +602,10 @@ OPC UA (when the YAML lists `protocol: opcua`): in **UA Expert** connect to
 `opc.tcp://127.0.0.1:4840`, accept SecurityPolicy **None** and **Anonymous**.
 Browse `Objects → Holding` (engineering values, e.g. temperature ≈ 22.5).
 
+BACnet/IP (when the YAML lists `protocol: bacnet-ip`): in **YABE** or any
+BACnet explorer, Who-Is on `47808` finds the device by its `device_instance`,
+then read or write `Present_Value` on the exported objects.
+
 ---
 
 ## Device YAML Schema
@@ -691,6 +743,7 @@ All settings use the `SIMBUS_` prefix and can be set via environment variables o
 | `SIMBUS_MODBUS_PORT` | device YAML default | Override Modbus TCP listen port |
 | `SIMBUS_MODBUS_TLS_PORT` | YAML (`802` if omitted) | Override Modbus TLS listen port. Ignored unless the document has `modbus-tls` |
 | `SIMBUS_OPCUA_PORT` | YAML (`4840` if omitted) | Override OPC UA listen port. Ignored unless the document has `opcua` |
+| `SIMBUS_BACNET_PORT` | YAML (`47808` if omitted) | Override BACnet/IP listen port. Ignored unless the document has `bacnet-ip` |
 | `SIMBUS_API_HOST` | `0.0.0.0` | REST API bind address |
 | `SIMBUS_API_PORT` | `8000` | REST API listen port |
 | `SIMBUS_TICK_INTERVAL` | `1.0` | Wall sample period in seconds (`--tick`) |
@@ -722,7 +775,7 @@ Typical events include:
 
 - `loading device yaml` / `loading default template` / `loading embedded default template`
 - `simbus started` / `simbus stopping`
-- `api listening` / `modbus server listening` / `opcua listening`
+- `api listening` / `modbus server listening` / `opcua listening` / `bacnet listening`
 - `fault injected` / `fault expired` / `faults cleared` / `simulation reset`
 - `simulation paused` / `simulation resumed`
 - `simulation base changed` / `alarm activated` / `alarm cleared` / `discrete changed`
@@ -847,7 +900,7 @@ simbus/
 There is no `scenarios/` folder and no Python tree. Bundled scenarios live in
 each device YAML (`scenarios:`). Crate tests: [docs/architecture.md](docs/architecture.md)
 §2. Run them with `cargo test -p spec` (or `engine`, `control`, `modbus`,
-`simbus`).
+`opcua`, `bacnet`, `simbus`).
 
 ### Documentation
 
@@ -867,6 +920,7 @@ npx skills add obsidia-systems/simbus@simbus-device
 - [docs/runtime.md](docs/runtime.md) — Binary, boot, CLI/env, signals, Docker.
 - [docs/modbus.md](docs/modbus.md) — Field plane: Modbus TCP (V1.1b3 / V1.0b).
 - [docs/opcua.md](docs/opcua.md) — Field plane: OPC UA (IANA 4840), YAML map as variables.
+- [docs/bacnet.md](docs/bacnet.md) — Field plane: BACnet/IP (IANA 47808), export rows as objects.
 - [docs/control.md](docs/control.md) — Session HTTP (not the field protocol).
 - [docs/simulation.md](docs/simulation.md) — Tick, `state.base`, behaviors, faults.
 - [docs/scenarios.md](docs/scenarios.md) — How to run bundled scenarios.
@@ -893,8 +947,8 @@ timeline
     title simbus Roadmap
     v0.1 — Core : Modbus TCP, 7 templates, 6 behaviors, REST plus SSE, faults, Docker
     v0.2 — Scenarios : Playback API, recipes later moved into device YAML
-    v0.3 — Rust workspace : this tree — tokio-modbus, axum, file-only boot, pause, session scenarios, Modbus TLS 802, OPC UA 4840, healthz/readyz/metrics
-    Specified not served : MQTT Sparkplug, SNMP v2c, BACnet/IP, Modbus RTU
+    v0.3 — Rust workspace : this tree — tokio-modbus, axum, file-only boot, pause, session scenarios, Modbus TLS 802, OPC UA 4840, BACnet/IP 47808, healthz/readyz/metrics
+    Specified not served : MQTT Sparkplug, SNMP v2c, Modbus RTU
 ```
 
 Unimplemented protocol **syntax** is already valid YAML (`simbus check` notes it;

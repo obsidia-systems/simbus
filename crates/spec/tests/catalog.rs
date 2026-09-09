@@ -332,6 +332,156 @@ registers:
     assert!(report.contains("opcua :4840"));
 }
 
+#[test]
+fn bacnet_ip_is_implemented_with_default_port() {
+    let yaml = r"
+name: bn-box
+spec_version: 2
+version: '1.0'
+type: meter
+points:
+  - id: watts
+    kind: analog
+    class: input
+    default: 1.0
+  - id: enable
+    kind: binary
+    class: value
+    default: false
+bindings:
+  - protocol: bacnet-ip
+    device_instance: 1001
+    export:
+      watts:
+        object: analog-input
+        instance: 1
+      enable:
+        object: binary-value
+        instance: 1
+";
+    let spec = load_device_from_str(yaml).unwrap();
+    assert!(spec.unimplemented_protocols().is_empty());
+    match &spec.resolved_bindings()[0] {
+        spec::BindingSpec::BacnetIp {
+            port,
+            device_instance,
+            export,
+        } => {
+            assert_eq!(*port, 47808);
+            assert_eq!(*device_instance, 1001);
+            assert_eq!(export.len(), 2);
+        }
+        other => panic!("expected bacnet-ip, got {other:?}"),
+    }
+    // A document without a Modbus plane still backs every point in the engine.
+    assert_eq!(spec.registers.holding.len(), 1);
+    assert_eq!(spec.registers.coils.len(), 1);
+    assert!(spec.bacnet_export_warnings().is_empty());
+    let report = device_report("bacnet.yaml", &spec);
+    assert!(!report.contains("specified, not implemented"));
+    assert!(report.contains("bacnet-ip :47808 instance 1001"));
+}
+
+#[test]
+fn bacnet_export_rejects_unknown_point_and_duplicate_instance() {
+    let unknown = r"
+name: bn-box
+spec_version: 2
+version: '1.0'
+type: meter
+points:
+  - id: watts
+    kind: analog
+    class: input
+    default: 1.0
+bindings:
+  - protocol: bacnet-ip
+    device_instance: 1001
+    export:
+      volts:
+        object: analog-input
+        instance: 1
+";
+    let err = load_device_from_str(unknown).unwrap_err();
+    assert!(err.to_string().contains("is not a point"), "{err}");
+
+    let duplicate = r"
+name: bn-box
+spec_version: 2
+version: '1.0'
+type: meter
+points:
+  - id: watts
+    kind: analog
+    class: input
+    default: 1.0
+  - id: volts
+    kind: analog
+    class: input
+    default: 2.0
+bindings:
+  - protocol: bacnet-ip
+    device_instance: 1001
+    export:
+      watts:
+        object: analog-input
+        instance: 1
+      volts:
+        object: analog-input
+        instance: 1
+";
+    let err = load_device_from_str(duplicate).unwrap_err();
+    assert!(err.to_string().contains("duplicate"), "{err}");
+}
+
+#[test]
+fn bacnet_export_warns_on_object_mismatch_and_missing_cell() {
+    let yaml = r"
+name: bn-box
+spec_version: 2
+version: '1.0'
+type: meter
+points:
+  - id: watts
+    kind: analog
+    class: input
+    default: 1.0
+  - id: volts
+    kind: analog
+    class: input
+    default: 2.0
+bindings:
+  - protocol: modbus-tcp
+    export:
+      watts:
+        space: input
+        address: 0
+        scale: 1
+        data_type: uint16
+  - protocol: bacnet-ip
+    device_instance: 1001
+    export:
+      watts:
+        object: analog-value
+        instance: 1
+      volts:
+        object: analog-input
+        instance: 2
+";
+    let spec = load_device_from_str(yaml).unwrap();
+    let warnings = spec.bacnet_export_warnings();
+    assert!(
+        warnings.iter().any(|w| w.contains("but point is analog")),
+        "{warnings:?}"
+    );
+    assert!(
+        warnings.iter().any(|w| w.contains("no engine cell")),
+        "{warnings:?}"
+    );
+    let report = device_report("bacnet.yaml", &spec);
+    assert!(report.contains("no engine cell"));
+}
+
 fn holding_sim(body: &str) -> String {
     format!(
         r"

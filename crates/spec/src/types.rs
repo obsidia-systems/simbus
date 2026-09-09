@@ -181,7 +181,10 @@ impl ProtocolId {
     /// unimplemented.
     #[must_use]
     pub const fn is_implemented(self) -> bool {
-        matches!(self, Self::ModbusTcp | Self::ModbusTls | Self::Opcua)
+        matches!(
+            self,
+            Self::ModbusTcp | Self::ModbusTls | Self::Opcua | Self::BacnetIp
+        )
     }
 }
 
@@ -830,7 +833,7 @@ pub struct ModbusExportEntry {
 pub struct OpcuaExportEntry {}
 
 /// BACnet object type in `export.object`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum BacnetObjectType {
     /// Analog Input.
@@ -1276,13 +1279,20 @@ impl DeviceSpec {
                             "language 2: bacnet-ip bindings require a non-empty export".into(),
                         ));
                     }
+                    let mut seen = std::collections::HashSet::new();
                     for (id, entry) in export {
-                        let Some(point) = self.point(id) else {
+                        let Some(_point) = self.point(id) else {
                             return Err(SpecError::Validation(format!(
                                 "bacnet export '{id}' is not a point"
                             )));
                         };
-                        let _ = (point, entry);
+                        if !seen.insert((entry.object, entry.instance)) {
+                            return Err(SpecError::Validation(format!(
+                                "bacnet export '{id}': duplicate {} instance {}",
+                                entry.object.as_str(),
+                                entry.instance
+                            )));
+                        }
                     }
                 }
                 _ => {}
@@ -1346,27 +1356,42 @@ impl DeviceSpec {
         Ok(())
     }
 
-    /// Notes when a BACnet object does not match `kind` × `class`.
+    /// Notes when a BACnet object does not match `kind` × `class`, or when the
+    /// point has no engine cell because this document also binds Modbus and did
+    /// not export that id there (`docs/bacnet.md` §4).
     #[must_use]
     pub fn bacnet_export_warnings(&self) -> Vec<String> {
         let mut out = Vec::new();
         for binding in &self.bindings {
             if let BindingSpec::BacnetIp { export, .. } = binding {
                 for (id, entry) in export {
-                    if let Some(point) = self.point(id)
-                        && !entry.object.matches_point(point.kind, point.class)
-                    {
-                        out.push(format!(
-                            "bacnet export '{id}' is {} but point is {} {}",
-                            entry.object.as_str(),
-                            point.kind.as_str(),
-                            point.class.as_str()
-                        ));
+                    if let Some(point) = self.point(id) {
+                        if !entry.object.matches_point(point.kind, point.class) {
+                            out.push(format!(
+                                "bacnet export '{id}' is {} but point is {} {}",
+                                entry.object.as_str(),
+                                point.kind.as_str(),
+                                point.class.as_str()
+                            ));
+                        }
+                        if !self.point_is_backed(id) {
+                            out.push(format!(
+                                "bacnet export '{id}' has no engine cell: this document binds Modbus but does not export '{id}' there"
+                            ));
+                        }
                     }
                 }
             }
         }
         out
+    }
+
+    /// Whether a point currently has a cell in the engine bank.
+    fn point_is_backed(&self, id: &str) -> bool {
+        self.registers.holding.iter().any(|r| r.name == id)
+            || self.registers.input.iter().any(|r| r.name == id)
+            || self.registers.coils.iter().any(|c| c.name == id)
+            || self.registers.discrete.iter().any(|c| c.name == id)
     }
 
     /// Look up a canonical point.

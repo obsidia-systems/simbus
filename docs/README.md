@@ -18,6 +18,7 @@ Classified with [Diátaxis](https://diataxis.fr/) so each page has one job.
 | [spec.md](spec.md) | Reference | Device YAML language (boot contract) |
 | [runtime.md](runtime.md) | Reference | Binary, boot, CLI/env, signals, Docker |
 | [opcua.md](opcua.md) | Reference | Field plane: OPC UA (IANA 4840), YAML map as variables |
+| [bacnet.md](bacnet.md) | Reference | Field plane: BACnet/IP (IANA 47808), export rows as objects |
 | [control.md](control.md) | Reference | Session HTTP (not the field protocol) |
 | [simulation.md](simulation.md) | Reference | Tick, `state.base`, behaviors, faults, encode |
 | [scenarios.md](scenarios.md) | How-to | Run and author bundled scenarios |
@@ -54,6 +55,7 @@ flowchart LR
     operator[Operator] --> runtime[runtime.md]
     scada[SCADA] --> modbus[modbus.md]
     scada --> opcua[opcua.md]
+    scada --> bacnet[bacnet.md]
     gui[GUI / tests] --> control[control.md]
     spec --> check["simbus check"]
     runtime --> process[simbus process]

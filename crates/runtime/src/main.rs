@@ -75,6 +75,9 @@ struct RunArgs {
     /// OPC UA port (overrides YAML; ignored unless the document has opcua)
     #[arg(long, env = "SIMBUS_OPCUA_PORT")]
     opcua_port: Option<u16>,
+    /// BACnet/IP UDP port (overrides YAML; ignored unless the document has bacnet-ip)
+    #[arg(long, env = "SIMBUS_BACNET_PORT")]
+    bacnet_port: Option<u16>,
     /// REST API port
     #[arg(long, env = "SIMBUS_API_PORT", default_value_t = 8000)]
     api_port: u16,
@@ -150,6 +153,8 @@ struct FieldListeners {
     tcp: Option<(u16, u8)>,
     tls: Option<TlsBind>,
     opcua: Option<u16>,
+    /// Resolved UDP port and BACnet device instance.
+    bacnet: Option<(u16, u32)>,
 }
 
 fn require_pem(path: &Path, label: &str) -> Result<()> {
@@ -164,6 +169,7 @@ fn field_listeners(spec: &spec::DeviceSpec, args: &RunArgs) -> Result<FieldListe
     let mut tcp_port: Option<u16> = None;
     let mut tls: Option<TlsBind> = None;
     let mut opcua: Option<u16> = None;
+    let mut bacnet: Option<(u16, u32)> = None;
     for binding in spec.resolved_bindings() {
         match binding {
             BindingSpec::ModbusTcp {
@@ -202,6 +208,13 @@ fn field_listeners(spec: &spec::DeviceSpec, args: &RunArgs) -> Result<FieldListe
             BindingSpec::Opcua { port, .. } => {
                 opcua = Some(args.opcua_port.unwrap_or(port));
             }
+            BindingSpec::BacnetIp {
+                port,
+                device_instance,
+                ..
+            } => {
+                bacnet = Some((args.bacnet_port.unwrap_or(port), device_instance));
+            }
             _ => {}
         }
     }
@@ -221,6 +234,7 @@ fn field_listeners(spec: &spec::DeviceSpec, args: &RunArgs) -> Result<FieldListe
         tcp: tcp_port.map(|port| (port, unit_id)),
         tls,
         opcua,
+        bacnet,
     })
 }
 
@@ -287,9 +301,11 @@ async fn main() -> Result<()> {
     let tcp = listeners.tcp;
     let tls = listeners.tls;
     let opcua = listeners.opcua;
+    let bacnet = listeners.bacnet;
     let modbus_port = tcp.map(|(p, _)| p).unwrap_or(spec.modbus.default_port);
     let modbus_tls_port = tls.as_ref().map(|t| t.port);
     let opcua_port = opcua;
+    let bacnet_port = bacnet.map(|(p, _)| p);
     let device = Device::new(spec, args.seed, args.tick);
     device.set_running(true);
 
@@ -297,6 +313,7 @@ async fn main() -> Result<()> {
     let tcp_ready = Arc::new(AtomicBool::new(tcp.is_none()));
     let tls_ready = Arc::new(AtomicBool::new(tls.is_none()));
     let opcua_ready = Arc::new(AtomicBool::new(opcua.is_none()));
+    let bacnet_ready = Arc::new(AtomicBool::new(bacnet.is_none()));
     let cors: Vec<String> = args
         .cors_origins
         .split(',')
@@ -312,9 +329,11 @@ async fn main() -> Result<()> {
         modbus_port,
         modbus_tls_port,
         opcua_port,
+        bacnet_port,
         modbus_ready: tcp_ready.clone(),
         modbus_tls_ready: tls_ready.clone(),
         opcua_ready: opcua_ready.clone(),
+        bacnet_ready: bacnet_ready.clone(),
         scenario_task: Arc::new(Mutex::new(None)),
         snapshots: snapshots.clone(),
         time_scale: args.time_scale,
@@ -327,6 +346,7 @@ async fn main() -> Result<()> {
         modbus_port,
         modbus_tls_port,
         opcua_port,
+        bacnet_port,
         tick_interval = args.tick,
         time_scale = args.time_scale,
         "simbus started"
@@ -409,6 +429,21 @@ async fn main() -> Result<()> {
         }));
     }
 
+    let mut bacnet_task: Option<JoinHandle<()>> = None;
+    if let Some((port, device_instance)) = bacnet {
+        let mut shutdown = cancel_tx.subscribe();
+        let bn_device = device.clone();
+        let ready = bacnet_ready;
+        bacnet_task = Some(tokio::spawn(async move {
+            let stop = async move {
+                let _ = shutdown.wait_for(|stop| *stop).await;
+            };
+            if let Err(err) = bacnet::serve(bn_device, port, device_instance, ready, stop).await {
+                error!(error = %err, "bacnet server failed");
+            }
+        }));
+    }
+
     let mut api_shutdown = cancel_tx.subscribe();
     let api_host = args.host.clone();
     let api_port = args.api_port;
@@ -439,6 +474,10 @@ async fn main() -> Result<()> {
             error!("opcua task ended");
             false
         }
+        _ = wait_optional_task(&mut bacnet_task) => {
+            error!("bacnet task ended");
+            false
+        }
         res = &mut api_task => {
             error!(?res, "api task ended");
             false
@@ -453,6 +492,7 @@ async fn main() -> Result<()> {
             abort_optional(&tcp_task);
             abort_optional(&tls_task);
             abort_optional(&ua_task);
+            abort_optional(&bacnet_task);
             api_task.abort();
         } else {
             tokio::select! {
@@ -460,6 +500,7 @@ async fn main() -> Result<()> {
                     join_optional(&mut tcp_task).await;
                     join_optional(&mut tls_task).await;
                     join_optional(&mut ua_task).await;
+                    join_optional(&mut bacnet_task).await;
                     let _ = tokio::join!(&mut tick_task, &mut api_task);
                 } => {}
                 () = tokio::time::sleep(Duration::from_secs_f64(args.shutdown_timeout)) => {
@@ -467,6 +508,7 @@ async fn main() -> Result<()> {
                     abort_optional(&tcp_task);
                     abort_optional(&tls_task);
                     abort_optional(&ua_task);
+                    abort_optional(&bacnet_task);
                     api_task.abort();
                 }
             }
@@ -477,6 +519,7 @@ async fn main() -> Result<()> {
         abort_optional(&tcp_task);
         abort_optional(&tls_task);
         abort_optional(&ua_task);
+        abort_optional(&bacnet_task);
         api_task.abort();
         bail!("a runtime task ended unexpectedly")
     }
@@ -749,6 +792,7 @@ registers:
         assert_eq!(listeners.tcp, Some((502, 1)));
         assert!(listeners.tls.is_none());
         assert!(listeners.opcua.is_none());
+        assert!(listeners.bacnet.is_none());
     }
 
     #[test]
@@ -805,6 +849,67 @@ registers:
       scale: 10
       data_type: uint16
 "
+    }
+
+    fn bacnet_yaml() -> &'static str {
+        r"
+name: bn-fix
+spec_version: 2
+version: '1.0'
+type: fixture
+points:
+  - id: temperature
+    kind: analog
+    class: input
+    unit: degC
+    default: 22.5
+  - id: setpoint
+    kind: analog
+    class: value
+    unit: degC
+    default: 21.0
+bindings:
+  - protocol: bacnet-ip
+    device_instance: 1001
+    export:
+      temperature:
+        object: analog-input
+        instance: 1
+      setpoint:
+        object: analog-value
+        instance: 1
+"
+    }
+
+    #[test]
+    fn parses_bacnet_port_flag() {
+        let cli = Cli::try_parse_from(["simbus", "--bacnet-port", "57808"]).unwrap();
+        assert_eq!(cli.run.bacnet_port, Some(57808));
+    }
+
+    #[test]
+    fn bacnet_port_override_requires_binding() {
+        let spec = load_device_from_str(sample_yaml()).unwrap();
+        let args = Cli::try_parse_from(["simbus", "--bacnet-port", "57808"])
+            .unwrap()
+            .run;
+        let listeners = field_listeners(&spec, &args).unwrap();
+        assert!(listeners.bacnet.is_none());
+    }
+
+    #[test]
+    fn bacnet_binding_uses_yaml_then_override() {
+        let spec = load_device_from_str(bacnet_yaml()).unwrap();
+        let args = Cli::try_parse_from(["simbus"]).unwrap().run;
+        let listeners = field_listeners(&spec, &args).unwrap();
+        assert!(listeners.tcp.is_none());
+        assert_eq!(listeners.bacnet, Some((47808, 1001)));
+
+        let args = Cli::try_parse_from(["simbus", "--bacnet-port", "57808"])
+            .unwrap()
+            .run;
+        let listeners = field_listeners(&spec, &args).unwrap();
+        assert_eq!(listeners.bacnet, Some((57808, 1001)));
     }
 
     #[test]

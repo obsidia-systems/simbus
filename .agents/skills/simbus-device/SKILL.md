@@ -125,9 +125,16 @@ has no PEM). Dual-bind with `modbus-tcp` for 502 clear vs 802 TLS. `opcua` is
 served (IANA 4840, None + Anonymous). Language 2 NodeIds are `ns=N;s={id}`
 under Input/Value/Output folders; language 1 stays `holding/{name}`. Do
 **not** add `opcua` to `devices/builtin/` (Compose does not publish 4840).
-Language 2 `opcua` / `bacnet-ip` also need a non-empty `export`. Do not add
-`modbus-rtu`, `snmp-v2c`, `mqtt-sparkplug`, or `bacnet-ip` unless the user
-asked for syntax-only; `simbus check` accepts them, **boot refuses**.
+`bacnet-ip` is served (IANA 47808, language 2 only). It needs
+`device_instance` and an `export` map of `{point-id: {object, instance}}`
+where `object` is `analog-input` / `analog-value` / `analog-output` /
+`binary-input` / `binary-value` / `binary-output`. `(object, instance)` pairs
+must be unique. Do **not** add `bacnet-ip` to `devices/builtin/` (Compose does
+not publish 47808). On a document that also binds Modbus, a BACnet row only
+has a value when that id is in the Modbus `export` too — `check` warns
+otherwise. Language 2 `opcua` / `bacnet-ip` need a non-empty `export`. Do not
+add `modbus-rtu`, `snmp-v2c`, or `mqtt-sparkplug` unless the user asked for
+syntax-only; `simbus check` accepts them, **boot refuses**.
 
 ## Validate (mandatory)
 

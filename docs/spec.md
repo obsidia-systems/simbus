@@ -254,7 +254,7 @@ MAY boot HTTP-only. Every served `modbus-tcp`, `modbus-tls`, `opcua`, and
 | `snmp-v2c` | yes | no |
 | `opcua` | yes | **yes** |
 | `mqtt-sparkplug` | yes | no |
-| `bacnet-ip` | yes | no |
+| `bacnet-ip` | yes | **yes** |
 
 `simbus check` MUST list unimplemented protocols as `specified, not implemented`.
 The process MUST NOT boot if any **resolved** binding is unimplemented.
@@ -316,12 +316,25 @@ CLI `--opcua-port` / `SIMBUS_OPCUA_PORT` may override the port ([runtime.md](run
 
 **`mqtt-sparkplug`** — specified, not implemented: `broker`, `group_id`, `edge_node_id`.
 
-**`bacnet-ip`** — specified, not implemented: `port` (default 47808),
-`device_instance`. Language 2 MUST also set `export` (non-empty). Each row
-has `object` (`analog-input` · `analog-value` · `analog-output` ·
+**`bacnet-ip`** — served (BACnet/IP over UDP, IANA **47808**):
+
+| Field | Type | Default |
+| --- | --- | --- |
+| `port` | uint16? | `47808` |
+| `device_instance` | uint32 | required |
+| `export` | map | language 2: required, non-empty. Keys are point ids. |
+
+Each row has `object` (`analog-input` · `analog-value` · `analog-output` ·
 `binary-input` · `binary-value` · `binary-output`) and `instance` (uint32).
-Object type SHOULD match `kind` × `class`; `simbus check` MAY warn when it
-does not. Object maps were not in language 1.
+`(object, instance)` MUST be unique in the binding. Object type SHOULD match
+`kind` × `class`; `simbus check` MAY warn when it does not. Object maps were
+not in language 1, so language-1 documents cannot serve BACnet.
+
+CLI `--bacnet-port` / `SIMBUS_BACNET_PORT` may override the port
+([runtime.md](runtime.md)). It does not rewrite the YAML and MUST NOT enable
+BACnet unless the document already has this binding. Official maps under
+`devices/builtin/` MUST NOT declare this binding (Compose does not publish
+47808). Objects, services, and the write path are [bacnet.md](bacnet.md).
 
 ---
 
@@ -329,7 +342,12 @@ does not. Object maps were not in language 1.
 
 Language 2 authors do not write this section: the loader materializes it from
 the first non-empty Modbus `export` so the engine and Modbus crate can keep an
-address bank. Language 1 authors write four spaces with Modbus names:
+address bank. A document with **no** Modbus binding (OPC UA-only or
+BACnet-only) gets a private cell per point instead (`float32` for analog, a
+coil for binary) so every point still has an engine value. In a document that
+binds Modbus, a point left out of the Modbus `export` has **no** cell, and a
+BACnet or OPC UA row naming it warns in `simbus check`. Language 1 authors
+write four spaces with Modbus names:
 
 | YAML key | Modbus | Client access |
 | --- | --- | --- |

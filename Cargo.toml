@@ -1,11 +1,12 @@
 [workspace]
 resolver = "2"
-members = [
+    members = [
     "crates/spec",
     "crates/engine",
     "crates/control",
     "crates/modbus",
     "crates/opcua",
+    "crates/bacnet",
     "crates/runtime",
 ]
 default-members = ["crates/runtime"]
@@ -26,6 +27,7 @@ engine = { path = "crates/engine", version = "0.3.0" }
 control = { path = "crates/control", version = "0.3.0" }
 modbus = { path = "crates/modbus", version = "0.3.0" }
 opcua = { path = "crates/opcua", version = "0.3.0" }
+bacnet = { path = "crates/bacnet", version = "0.3.0" }
 
 anyhow = { version = "1.0", default-features = false, features = ["std"] }
 async-trait = { version = "0.1", default-features = false }

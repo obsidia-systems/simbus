@@ -1,0 +1,28 @@
+[package]
+name = "bacnet"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+description = "BACnet/IP server for simbus"
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+bacnet-objects = "0.11.0"
+bacnet-server = { version = "0.11.0", default-features = false }
+bacnet-types = "0.11.0"
+engine = { workspace = true }
+spec = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+bacnet-client = "0.11.0"
+engine = { workspace = true }
+spec = { workspace = true }
+tokio = { workspace = true }

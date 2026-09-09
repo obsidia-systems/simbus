@@ -148,6 +148,13 @@ fn modbus_from_bindings(bindings: &[BindingSpec]) -> ModbusSpec {
 fn materialize_registers(spec: &DeviceSpec) -> Result<RegisterMapSpec, SpecError> {
     let mut map = RegisterMapSpec::default();
     let Some(export) = first_modbus_export(&spec.bindings) else {
+        // No Modbus plane at all (for example an `opcua`-only or `bacnet-ip`-only
+        // document): the engine bank is still address-backed in this version, so
+        // give every point a private cell. Nothing is published on Modbus because
+        // no Modbus listener is started.
+        if !has_modbus_binding(&spec.bindings) {
+            back_all_points(spec, &mut map);
+        }
         return Ok(map);
     };
     for (id, entry) in export {
@@ -189,6 +196,51 @@ fn materialize_registers(spec: &DeviceSpec) -> Result<RegisterMapSpec, SpecError
         }
     }
     Ok(map)
+}
+
+fn has_modbus_binding(bindings: &[BindingSpec]) -> bool {
+    bindings.iter().any(|binding| {
+        matches!(
+            binding,
+            BindingSpec::ModbusTcp { .. } | BindingSpec::ModbusTls { .. }
+        )
+    })
+}
+
+/// Give each point a backing cell when the document has no Modbus plane.
+///
+/// Analog points use `float32` with `scale` 1 so the cell holds the
+/// engineering value (BACnet REAL, OPC UA Float) without raw quantization.
+fn back_all_points(spec: &DeviceSpec, map: &mut RegisterMapSpec) {
+    let mut word = 0u16;
+    let mut bit = 0u16;
+    for point in &spec.points {
+        match point.kind {
+            PointKind::Analog => {
+                map.holding.push(RegisterSpec {
+                    address: word,
+                    name: point.id.clone(),
+                    description: point.description.clone(),
+                    unit: point.unit.clone(),
+                    default: point.analog_default,
+                    scale: 1,
+                    data_type: crate::DataType::Float32,
+                    simulation: point.simulation.clone(),
+                });
+                word = word.saturating_add(2);
+            }
+            PointKind::Binary => {
+                map.coils.push(CoilSpec {
+                    address: bit,
+                    name: point.id.clone(),
+                    description: point.description.clone(),
+                    default: point.binary_default,
+                    trigger: point.trigger.clone(),
+                });
+                bit = bit.saturating_add(1);
+            }
+        }
+    }
 }
 
 fn first_modbus_export(bindings: &[BindingSpec]) -> Option<&BTreeMap<String, ModbusExportEntry>> {

@@ -4,7 +4,7 @@
 **Device language:** [spec.md](spec.md)  
 **Process:** [runtime.md](runtime.md)  
 **Tick:** [simulation.md](simulation.md)  
-**Field plane:** [modbus.md](modbus.md) · [opcua.md](opcua.md)  
+**Field plane:** [modbus.md](modbus.md) · [opcua.md](opcua.md) · [bacnet.md](bacnet.md)  
 **Shape of the process:** [architecture.md](architecture.md)  
 **Interactive HTTP:** `GET /docs` (OpenAPI)
 
@@ -82,10 +82,10 @@ GET (including SSE) is not keyed. Missing/wrong key on a write MUST 401.
 
 | Method | Path | Notes |
 | --- | --- | --- |
-| `GET` | `/status` | Live: name, type, Modbus TCP port, `modbus_tls_port` / `opcua_port` (`null` if that binding is absent), tick, `time_scale`, `running`/`stopped`, field plane `listening`/`stopped` |
+| `GET` | `/status` | Live: name, type, Modbus TCP port, `modbus_tls_port` / `opcua_port` / `bacnet_port` (`null` if that binding is absent), tick, `time_scale`, `running`/`stopped`, field plane `listening`/`stopped` |
 | `GET` | `/config` | Document snapshot: map, `spec_version`, endianness, YAML `modbus.default_port`, bundled scenarios |
 | `GET` | `/healthz` | Liveness (always 200 if the task is up) |
-| `GET` | `/readyz` | 200 when **every** requested field listener is up **and** the simulation is running; else 503 (paused → 503). TLS-only or OPC UA-only: TCP is not required. Dual-bind: every listed plane |
+| `GET` | `/readyz` | 200 when **every** requested field listener is up **and** the simulation is running; else 503 (paused → 503). TLS-only, OPC UA-only, or BACnet-only: TCP is not required. Dual-bind: every listed plane |
 | `GET` | `/metrics` | Prometheus text |
 | `GET` | `/docs` | Swagger UI |
 | `GET` | `/api-docs/openapi.json` | OpenAPI 3. The document MUST list every route in this section |
@@ -95,6 +95,8 @@ GET (including SSE) is not keyed. Missing/wrong key on a write MUST 401.
 document has no `modbus-tls` binding.
 `/status.opcua_port` is the OPC UA listen port, or JSON `null` when the
 document has no `opcua` binding.
+`/status.bacnet_port` is the BACnet/IP UDP port, or JSON `null` when the
+document has no `bacnet-ip` binding.
 `/config.modbus_port` is the YAML `modbus.default_port`. TCP listen and YAML
 default differ when CLI overrides `--port`.
 
