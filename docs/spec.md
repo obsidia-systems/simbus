@@ -161,7 +161,10 @@ This runtime MUST reject any other integer. When the language gains a breaking
 change, increment `SPEC_VERSION` in `crates/spec` and this document in the
 same change.
 
-New official maps SHOULD use language 2. Community maps MAY stay on 1.
+Every map shipped in this repository — `devices/builtin/` and
+`devices/community/` — is language 2. New maps SHOULD use language 2.
+Language 1 stays loadable for documents written against an earlier release;
+it is not the form to write today, and it cannot serve BACnet (§4.2).
 
 ### 3.2 `identity`
 
@@ -476,13 +479,13 @@ scenarios:
     description: Gradual rise, then a spike.
     steps:
       - at: 0
-        action: set_register
-        register_name: temperature
+        action: set_point
+        point: temperature
         value: 22.0
       - at: 12
         action: inject_fault
         fault_type: spike
-        register_name: temperature
+        point: temperature
         value: 42.0
         duration_s: 30
 ```

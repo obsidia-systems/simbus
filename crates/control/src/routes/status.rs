@@ -6,10 +6,65 @@ use axum::http::StatusCode;
 use spec::BehaviorSpec;
 
 use crate::AppState;
-use crate::dto::{CoilInfo, ConfigResponse, RegisterInfo, RegisterMapResponse, StatusResponse};
+use crate::dto::{
+    BindingInfo, CoilInfo, ConfigResponse, RegisterInfo, RegisterMapResponse, StatusResponse,
+};
 
 fn behavior_name(spec: Option<&BehaviorSpec>) -> Option<String> {
     spec.map(|b| b.kind_name().to_owned())
+}
+
+/// Document view of the field plane: YAML values, no CLI overrides
+/// (`docs/control.md` § Discovery).
+fn binding_info(spec: &spec::DeviceSpec) -> Vec<BindingInfo> {
+    spec.resolved_bindings()
+        .iter()
+        .map(|binding| {
+            let protocol = binding.protocol_id();
+            let mut info = BindingInfo {
+                protocol: protocol.as_str(),
+                port: None,
+                unit_id: None,
+                endianness: None,
+                device_instance: None,
+                points: None,
+                implemented: protocol.is_implemented(),
+            };
+            match binding {
+                spec::BindingSpec::ModbusTcp {
+                    port,
+                    unit_id,
+                    endianness,
+                    export,
+                } => {
+                    info.port = Some(port.unwrap_or(spec.modbus.default_port));
+                    info.unit_id = Some(unit_id.unwrap_or(spec.modbus.unit_id));
+                    info.endianness = Some(endianness.as_str());
+                    info.points = Some(export.len());
+                }
+                spec::BindingSpec::ModbusTls { port, export, .. } => {
+                    info.port = Some(*port);
+                    info.points = Some(export.len());
+                }
+                spec::BindingSpec::Opcua { port, export } => {
+                    info.port = Some(*port);
+                    info.points = Some(export.len());
+                }
+                spec::BindingSpec::BacnetIp {
+                    port,
+                    device_instance,
+                    export,
+                } => {
+                    info.port = Some(*port);
+                    info.device_instance = Some(*device_instance);
+                    info.points = Some(export.len());
+                }
+                spec::BindingSpec::SnmpV2c { port, .. } => info.port = Some(*port),
+                spec::BindingSpec::ModbusRtu { .. } | spec::BindingSpec::MqttSparkplug { .. } => {}
+            }
+            info
+        })
+        .collect()
 }
 
 #[utoipa::path(get, path = "/status", responses((status = 200)))]
@@ -74,6 +129,7 @@ pub async fn get_config(State(state): State<AppState>) -> Json<ConfigResponse> {
         unit_id: spec.modbus.unit_id,
         endianness: spec.modbus.endianness.as_str().to_owned(),
         spec_version: spec.spec_version,
+        bindings: binding_info(spec),
         scenarios: spec
             .scenarios
             .iter()

@@ -1,91 +1,186 @@
+# Generic supervised door contact / access monitoring point.
+#
+# Point set follows what a monitored door reports to a BMS or access control
+# head end: door position from a magnetic contact, door-ajar (held open past
+# the allowed time), forced entry (opened with no valid credential), request
+# to exit, enclosure tamper, supervised-loop fault, and power / comms health,
+# plus an open-event counter and the time the door has been open.
+#
+# `door_open` and `door_held_open` follow `open_duration`, so the contact
+# behaves like a real door: the cycle behavior opens it briefly every few
+# minutes, and a scenario that parks a long duration raises the ajar alarm.
+# `held_open_limit` is the published setpoint; the ajar threshold is fixed at
+# the same 30 s, because a trigger threshold is part of the boot contract and
+# cannot read another point.
+
 name: "Generic Door Contact"
-spec_version: 1
-version: "1.0"
+spec_version: 2
+version: "1.1"
 type: door_contact
 description: >
-  Generic door/access contact sensor simulator.
-  Models magnetic contact state, door-open duration, forced-entry detection,
-  and tamper sensing — representative of server room and cage door monitoring
-  in physical security and BMS integrations.
+  Supervised door contact for a server room or cage: position, ajar, forced
+  entry, request to exit, tamper, loop supervision, and power/comms health.
 
-modbus:
-  default_port: 502
-  unit_id: 1
-  endianness: big
+identity:
+  vendor: Obsidia
+  product: Generic Door Contact
+  revision: "1.1"
 
-registers:
-  holding:
-    - address: 0
-      name: door_open_duration
-      description: "Seconds the door has been continuously open (0 = closed)"
-      unit: "s"
-      default: 0.0
-      scale: 1
-      data_type: uint16
-      simulation:
-        behavior: sawtooth
-        period_seconds: 3600.0
-        min: 0.0
-        max: 300.0
+points:
+  # ---- Door activity ---------------------------------------------------
+  - id: open_duration
+    kind: analog
+    class: input
+    description: "Seconds the door has been continuously open (0 = closed)"
+    unit: "s"
+    default: 0.0
+    simulation:
+      behavior: cycle
+      dwell_seconds: 60
+      values: [0.0, 0.0, 0.0, 8.0, 0.0, 0.0, 14.0, 0.0]
 
-    - address: 1
-      name: open_count
-      description: "Total number of door open events since last reset"
-      unit: ""
-      default: 0.0
-      scale: 1
-      data_type: uint16
-      simulation:
-        behavior: drift
-        rate: 0.001
-        bounds: [0.0, 65535.0]
+  - id: open_count
+    kind: analog
+    class: input
+    description: "Door open events since the last counter reset"
+    unit: ""
+    default: 1284.0
+    simulation:
+      # The engine spreads a drift channel's starting value by 2 % of the
+      # span, so the bounds stay close to the default rather than covering
+      # the whole uint16 range.
+      behavior: drift
+      rate: 0.004
+      bounds: [1284.0, 1400.0]
 
-    - address: 2
-      name: ambient_temp
-      description: "Ambient temperature at door sensor location"
-      unit: "°C"
-      default: 21.0
-      scale: 10
-      data_type: uint16
-      simulation:
-        behavior: gaussian_noise
-        std_dev: 0.3
+  - id: ambient_temperature
+    kind: analog
+    class: input
+    description: "Temperature at the door sensor"
+    unit: "°C"
+    default: 21.0
+    simulation:
+      behavior: gaussian_noise
+      std_dev: 0.3
 
-  coils:
-    - address: 0
-      name: door_open
-      description: "Door is currently open"
-      default: false
+  # ---- Configuration (writable) ----------------------------------------
+  - id: held_open_limit
+    kind: analog
+    class: value
+    description: "Published door-ajar limit; the ajar trigger uses the same 30 s"
+    unit: "s"
+    default: 30.0
+    simulation:
+      behavior: constant
 
-    - address: 1
-      name: door_held_open
-      description: "Door held open beyond allowed duration"
-      default: false
-      trigger:
-        source_register: door_open_duration
-        condition: gt
-        threshold: 120.0
+  # ---- Door state ------------------------------------------------------
+  - id: door_open
+    kind: binary
+    class: input
+    description: "Magnetic contact open: the door is not closed"
+    default: false
+    trigger:
+      source: open_duration
+      condition: gt
+      threshold: 0.5
 
-    - address: 2
-      name: forced_entry
-      description: "Door opened without valid access credential"
-      default: false
+  - id: door_held_open
+    kind: binary
+    class: input
+    description: "Door held open past the allowed time (ajar)"
+    default: false
+    trigger:
+      source: open_duration
+      condition: gt
+      threshold: 30.0
 
-    - address: 3
-      name: tamper
-      description: "Sensor tamper or enclosure intrusion detected"
-      default: false
+  # ---- Security and supervision (writable) -----------------------------
+  - id: forced_entry
+    kind: binary
+    class: value
+    description: "Door opened with no valid credential and no request to exit"
+    default: false
 
-  discrete:
-    - address: 0
-      name: power_ok
-      description: "Sensor has valid power supply"
-      default: true
+  - id: request_to_exit
+    kind: binary
+    class: value
+    description: "Request-to-exit device operated: the next opening is legitimate"
+    default: false
 
-    - address: 1
-      name: comms_ok
-      description: "Communication link to access controller is healthy"
-      default: true
+  - id: tamper
+    kind: binary
+    class: value
+    description: "Enclosure tamper or sensor removal detected"
+    default: false
+
+  - id: line_fault
+    kind: binary
+    class: value
+    description: "Supervised loop out of range: shorted or cut wiring"
+    default: false
+
+  - id: power_ok
+    kind: binary
+    class: value
+    description: "Sensor supply voltage healthy"
+    default: true
+
+  - id: comms_ok
+    kind: binary
+    class: value
+    description: "Link to the access controller healthy"
+    default: true
+
+bindings:
+  - protocol: modbus-tcp
+    port: 502
+    unit_id: 1
+    endianness: big
+    export:
+      open_duration:
+        space: input
+        address: 0
+        scale: 1
+        data_type: uint16
+      open_count:
+        space: input
+        address: 1
+        scale: 1
+        data_type: uint16
+      ambient_temperature:
+        space: input
+        address: 2
+        scale: 10
+        data_type: int16
+      held_open_limit:
+        space: holding
+        address: 0
+        scale: 1
+        data_type: uint16
+      door_open:
+        space: discrete
+        address: 0
+      door_held_open:
+        space: discrete
+        address: 1
+      forced_entry:
+        space: coil
+        address: 0
+      request_to_exit:
+        space: coil
+        address: 1
+      tamper:
+        space: coil
+        address: 2
+      line_fault:
+        space: coil
+        address: 3
+      power_ok:
+        space: coil
+        address: 4
+      comms_ok:
+        space: coil
+        address: 5
 
 alarms:
   - name: "Door Held Open"
@@ -97,3 +192,107 @@ alarms:
   - name: "Sensor Tamper"
     severity: critical
     trigger: tamper
+  - name: "Line Fault"
+    severity: warning
+    trigger: line_fault
+
+scenarios:
+  - id: door-propped-open
+    name: Door Propped Open
+    description: >
+      Somebody wedges the cage door open during a delivery: the contact opens,
+      the ajar alarm fires past the limit, then the door is closed.
+    steps:
+      - at: 0
+        action: set_point
+        point: open_duration
+        value: 5.0
+      - at: 10
+        action: set_point
+        point: open_duration
+        value: 35.0
+      - at: 25
+        action: set_point
+        point: open_duration
+        value: 90.0
+      - at: 60
+        action: set_point
+        point: open_duration
+        value: 0.0
+
+  - id: forced-entry
+    name: Forced Entry
+    description: >
+      The door opens with no request to exit and no credential, and the
+      enclosure is tampered with. Tests critical security escalation.
+    steps:
+      - at: 0
+        action: set_point
+        point: open_duration
+        value: 3.0
+      - at: 1
+        action: set_point
+        point: forced_entry
+        value: true
+      - at: 4
+        action: set_point
+        point: tamper
+        value: true
+      - at: 90
+        action: set_point
+        point: forced_entry
+        value: false
+      - at: 90
+        action: set_point
+        point: tamper
+        value: false
+      - at: 90
+        action: set_point
+        point: open_duration
+        value: 0.0
+
+  - id: authorized-exit
+    name: Authorized Exit
+    description: >
+      Request to exit, a short opening, and a clean close. Nothing should
+      alarm: the negative case for a forced-entry rule.
+    steps:
+      - at: 0
+        action: set_point
+        point: request_to_exit
+        value: true
+      - at: 2
+        action: set_point
+        point: open_duration
+        value: 6.0
+      - at: 12
+        action: set_point
+        point: open_duration
+        value: 0.0
+      - at: 14
+        action: set_point
+        point: request_to_exit
+        value: false
+
+  - id: supervision-fault
+    name: Loop Supervision Fault
+    description: >
+      The supervised loop goes out of range and the controller link drops.
+      Tests that a BMS reports the point as unreliable, not as closed.
+    steps:
+      - at: 0
+        action: set_point
+        point: line_fault
+        value: true
+      - at: 5
+        action: set_point
+        point: comms_ok
+        value: false
+      - at: 120
+        action: set_point
+        point: line_fault
+        value: false
+      - at: 120
+        action: set_point
+        point: comms_ok
+        value: true

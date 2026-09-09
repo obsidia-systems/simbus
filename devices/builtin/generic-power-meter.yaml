@@ -1,183 +1,444 @@
+# Generic three-phase power meter.
+#
+# The Modbus layout is the Eastron SDM630 input-register map, which the
+# SDM630MCT, SDM630-TCP and a long tail of clone meters share, and which most
+# three-phase Modbus drivers already know: every parameter is an IEEE-754
+# float32 in two consecutive input registers, read with FC04.
+#
+# Addresses here are zero-based PDU addresses. The vendor documents them in
+# 1-based 3X numbering, so 30001 = address 0, 30007 = address 6, and so on.
+# Real meters answer at most 40 parameters (80 registers) per request.
+#
+# Nominal: 230/400 V, 50 Hz, 3p4w. For a 120/208 V 60 Hz service, change the
+# voltage and frequency defaults and the under/over-voltage thresholds.
+
 name: "Generic Power Meter"
-spec_version: 1
-version: "1.0"
+spec_version: 2
+version: "1.1"
 type: power_meter
 description: >
-  Generic three-phase power meter simulator.
-  Models per-phase voltage and current, real/reactive/apparent power,
-  power factor, and cumulative energy — common on Schneider PM/ION series
-  and similar submetering equipment in data centers.
+  Three-phase multifunction meter with the Eastron SDM630 float32 register
+  map: per-phase volts/amps/watts, line-to-line volts, totals, power factor,
+  frequency, and import/export energy counters.
 
-modbus:
-  default_port: 502
-  unit_id: 1
-  endianness: big
+identity:
+  vendor: Obsidia
+  product: Generic Power Meter
+  revision: "1.1"
 
-registers:
-  holding:
-    - address: 0
-      name: voltage_l1
-      description: "Line 1 voltage (L1-N)"
-      unit: "V"
-      default: 120.0
-      scale: 10
-      data_type: uint16
-      simulation:
-        behavior: gaussian_noise
-        std_dev: 0.3
+points:
+  # ---- Phase voltages (30001, 30003, 30005) ----------------------------
+  - id: voltage_l1_n
+    kind: analog
+    class: input
+    description: "Phase 1 line-to-neutral voltage"
+    unit: "V"
+    default: 230.4
+    simulation:
+      behavior: gaussian_noise
+      std_dev: 0.4
 
-    - address: 1
-      name: voltage_l2
-      description: "Line 2 voltage (L2-N)"
-      unit: "V"
-      default: 120.0
-      scale: 10
-      data_type: uint16
-      simulation:
-        behavior: gaussian_noise
-        std_dev: 0.3
+  - id: voltage_l2_n
+    kind: analog
+    class: input
+    description: "Phase 2 line-to-neutral voltage"
+    unit: "V"
+    default: 229.8
+    simulation:
+      behavior: gaussian_noise
+      std_dev: 0.4
 
-    - address: 2
-      name: voltage_l3
-      description: "Line 3 voltage (L3-N)"
-      unit: "V"
-      default: 120.0
-      scale: 10
-      data_type: uint16
-      simulation:
-        behavior: gaussian_noise
-        std_dev: 0.3
+  - id: voltage_l3_n
+    kind: analog
+    class: input
+    description: "Phase 3 line-to-neutral voltage"
+    unit: "V"
+    default: 230.9
+    simulation:
+      behavior: gaussian_noise
+      std_dev: 0.4
 
-    - address: 3
-      name: current_l1
-      description: "Line 1 current"
-      unit: "A"
-      default: 20.0
-      scale: 100
-      data_type: uint16
-      simulation:
-        behavior: sinusoidal
-        period_hours: 2
-        amplitude: 5.0
+  # ---- Phase currents (30007, 30009, 30011) ----------------------------
+  - id: current_l1
+    kind: analog
+    class: input
+    description: "Phase 1 current"
+    unit: "A"
+    default: 21.4
+    simulation:
+      behavior: sinusoidal
+      period_hours: 2
+      amplitude: 4.0
 
-    - address: 4
-      name: current_l2
-      description: "Line 2 current"
-      unit: "A"
-      default: 18.0
-      scale: 100
-      data_type: uint16
-      simulation:
-        behavior: sinusoidal
-        period_hours: 2
-        amplitude: 4.0
+  - id: current_l2
+    kind: analog
+    class: input
+    description: "Phase 2 current"
+    unit: "A"
+    default: 19.6
+    simulation:
+      behavior: sinusoidal
+      period_hours: 2
+      amplitude: 3.5
 
-    - address: 5
-      name: current_l3
-      description: "Line 3 current"
-      unit: "A"
-      default: 21.0
-      scale: 100
-      data_type: uint16
-      simulation:
-        behavior: sinusoidal
-        period_hours: 2
-        amplitude: 5.0
+  - id: current_l3
+    kind: analog
+    class: input
+    description: "Phase 3 current"
+    unit: "A"
+    default: 22.8
+    simulation:
+      behavior: sinusoidal
+      period_hours: 2
+      amplitude: 4.5
 
-    - address: 6
-      name: real_power
-      description: "Total three-phase real (active) power"
-      unit: "kW"
-      default: 7.0
-      scale: 100
-      data_type: uint16
-      simulation:
-        behavior: gaussian_noise
-        std_dev: 0.1
+  # ---- Per-phase active power (30013, 30015, 30017) --------------------
+  - id: active_power_l1
+    kind: analog
+    class: input
+    description: "Phase 1 active power (positive = import)"
+    unit: "W"
+    default: 4680.0
+    simulation:
+      behavior: gaussian_noise
+      std_dev: 40.0
 
-    - address: 7
-      name: reactive_power
-      description: "Total three-phase reactive power"
-      unit: "kVAR"
-      default: 1.5
-      scale: 100
-      data_type: uint16
-      simulation:
-        behavior: gaussian_noise
-        std_dev: 0.05
+  - id: active_power_l2
+    kind: analog
+    class: input
+    description: "Phase 2 active power (positive = import)"
+    unit: "W"
+    default: 4290.0
+    simulation:
+      behavior: gaussian_noise
+      std_dev: 40.0
 
-    - address: 8
-      name: apparent_power
-      description: "Total three-phase apparent power"
-      unit: "kVA"
-      default: 7.2
-      scale: 100
-      data_type: uint16
-      simulation:
-        behavior: gaussian_noise
-        std_dev: 0.1
+  - id: active_power_l3
+    kind: analog
+    class: input
+    description: "Phase 3 active power (positive = import)"
+    unit: "W"
+    default: 4990.0
+    simulation:
+      behavior: gaussian_noise
+      std_dev: 40.0
 
-    - address: 9
-      name: power_factor
-      description: "Average power factor (0–100 represents 0.00–1.00)"
-      unit: ""
-      default: 97.0
-      scale: 1
-      data_type: uint16
-      simulation:
-        behavior: gaussian_noise
-        std_dev: 0.5
+  # ---- Averages and sums (30043, 30047, 30049) -------------------------
+  - id: average_voltage_l_n
+    kind: analog
+    class: input
+    description: "Average line-to-neutral voltage"
+    unit: "V"
+    default: 230.4
+    simulation:
+      behavior: gaussian_noise
+      std_dev: 0.3
 
-    - address: 10
-      name: frequency
-      description: "Line frequency"
-      unit: "Hz"
-      default: 60.0
-      scale: 100
-      data_type: uint16
-      simulation:
-        behavior: gaussian_noise
-        std_dev: 0.02
+  - id: average_current
+    kind: analog
+    class: input
+    description: "Average line current"
+    unit: "A"
+    default: 21.3
+    simulation:
+      behavior: gaussian_noise
+      std_dev: 0.5
 
-    - address: 11
-      name: energy_kwh
-      description: "Cumulative active energy consumption"
-      unit: "kWh"
-      default: 0.0
-      scale: 10
-      data_type: uint16
-      simulation:
-        behavior: drift
-        rate: 0.002
-        bounds: [0.0, 6553.5]
+  - id: neutral_current
+    kind: analog
+    class: input
+    description: "Neutral current (phase imbalance)"
+    unit: "A"
+    default: 1.8
+    simulation:
+      behavior: gaussian_noise
+      std_dev: 0.3
 
-  coils:
-    - address: 0
-      name: undervoltage_l1
-      description: "Line 1 voltage below minimum threshold"
-      default: false
-      trigger:
-        source_register: voltage_l1
-        condition: lt
-        threshold: 108.0
+  # ---- System totals (30053, 30057, 30061, 30063, 30071) ---------------
+  - id: total_active_power
+    kind: analog
+    class: input
+    description: "Total system active power"
+    unit: "W"
+    default: 13960.0
+    simulation:
+      behavior: sinusoidal
+      period_hours: 4
+      amplitude: 900.0
 
-    - address: 1
-      name: overvoltage_l1
-      description: "Line 1 voltage above maximum threshold"
-      default: false
-      trigger:
-        source_register: voltage_l1
-        condition: gt
-        threshold: 132.0
+  - id: total_apparent_power
+    kind: analog
+    class: input
+    description: "Total system apparent power"
+    unit: "VA"
+    default: 14550.0
+    simulation:
+      behavior: sinusoidal
+      period_hours: 4
+      amplitude: 900.0
 
-    - address: 2
-      name: low_power_factor
-      description: "Power factor below acceptable limit"
-      default: false
-      trigger:
-        source_register: power_factor
-        condition: lt
-        threshold: 85.0
+  - id: total_reactive_power
+    kind: analog
+    class: input
+    description: "Total system reactive power"
+    unit: "VAr"
+    default: 3120.0
+    simulation:
+      behavior: gaussian_noise
+      std_dev: 60.0
+
+  - id: total_power_factor
+    kind: analog
+    class: input
+    description: "Total system power factor (0.00–1.00)"
+    unit: ""
+    default: 0.96
+    simulation:
+      behavior: gaussian_noise
+      std_dev: 0.005
+
+  - id: frequency
+    kind: analog
+    class: input
+    description: "Line frequency"
+    unit: "Hz"
+    default: 50.0
+    simulation:
+      behavior: gaussian_noise
+      std_dev: 0.02
+
+  # ---- Energy counters (30073, 30075, 30077) ---------------------------
+  - id: import_active_energy
+    kind: analog
+    class: input
+    description: "Total imported active energy"
+    unit: "kWh"
+    default: 184213.4
+    simulation:
+      # 0.004 kWh/s = 14.4 kW, the load this meter is carrying. Keep the
+      # bounds close to the default: the engine spreads a drift channel's
+      # starting value by 2 % of the span so two instances do not line up.
+      behavior: drift
+      rate: 0.004
+      bounds: [184213.4, 184500.0]
+
+  - id: export_active_energy
+    kind: analog
+    class: input
+    description: "Total exported active energy"
+    unit: "kWh"
+    default: 0.0
+    simulation:
+      behavior: constant
+
+  - id: import_reactive_energy
+    kind: analog
+    class: input
+    description: "Total imported reactive energy"
+    unit: "kVArh"
+    default: 41208.9
+    simulation:
+      behavior: drift
+      rate: 0.001
+      bounds: [41208.9, 41280.0]
+
+  # ---- Line-to-line voltages (30201, 30203, 30205) ---------------------
+  - id: voltage_l1_l2
+    kind: analog
+    class: input
+    description: "Line-to-line voltage L1–L2"
+    unit: "V"
+    default: 399.2
+    simulation:
+      behavior: gaussian_noise
+      std_dev: 0.6
+
+  - id: voltage_l2_l3
+    kind: analog
+    class: input
+    description: "Line-to-line voltage L2–L3"
+    unit: "V"
+    default: 398.6
+    simulation:
+      behavior: gaussian_noise
+      std_dev: 0.6
+
+  - id: voltage_l3_l1
+    kind: analog
+    class: input
+    description: "Line-to-line voltage L3–L1"
+    unit: "V"
+    default: 400.1
+    simulation:
+      behavior: gaussian_noise
+      std_dev: 0.6
+
+  # ---- Alert flags (not in the vendor map; simbus adds them) -----------
+  - id: undervoltage_l1
+    kind: binary
+    class: input
+    description: "Phase 1 voltage below 90 % of nominal"
+    default: false
+    trigger:
+      source: voltage_l1_n
+      condition: lt
+      threshold: 207.0
+
+  - id: overvoltage_l1
+    kind: binary
+    class: input
+    description: "Phase 1 voltage above 110 % of nominal"
+    default: false
+    trigger:
+      source: voltage_l1_n
+      condition: gt
+      threshold: 253.0
+
+  - id: overcurrent_l1
+    kind: binary
+    class: input
+    description: "Phase 1 current above the circuit rating"
+    default: false
+    trigger:
+      source: current_l1
+      condition: gt
+      threshold: 32.0
+
+  - id: low_power_factor
+    kind: binary
+    class: input
+    description: "Total power factor below the utility limit"
+    default: false
+    trigger:
+      source: total_power_factor
+      condition: lt
+      threshold: 0.85
+
+  - id: neutral_current_high
+    kind: binary
+    class: input
+    description: "Neutral current high: phases are unbalanced"
+    default: false
+    trigger:
+      source: neutral_current
+      condition: gt
+      threshold: 8.0
+
+bindings:
+  - protocol: modbus-tcp
+    port: 502
+    unit_id: 1
+    endianness: big
+    export:
+      # Every analog is float32 across two input registers (FC04),
+      # at the SDM630 zero-based address.
+      voltage_l1_n:
+        space: input
+        address: 0
+        data_type: float32
+      voltage_l2_n:
+        space: input
+        address: 2
+        data_type: float32
+      voltage_l3_n:
+        space: input
+        address: 4
+        data_type: float32
+      current_l1:
+        space: input
+        address: 6
+        data_type: float32
+      current_l2:
+        space: input
+        address: 8
+        data_type: float32
+      current_l3:
+        space: input
+        address: 10
+        data_type: float32
+      active_power_l1:
+        space: input
+        address: 12
+        data_type: float32
+      active_power_l2:
+        space: input
+        address: 14
+        data_type: float32
+      active_power_l3:
+        space: input
+        address: 16
+        data_type: float32
+      average_voltage_l_n:
+        space: input
+        address: 42
+        data_type: float32
+      average_current:
+        space: input
+        address: 46
+        data_type: float32
+      total_active_power:
+        space: input
+        address: 52
+        data_type: float32
+      total_apparent_power:
+        space: input
+        address: 56
+        data_type: float32
+      total_reactive_power:
+        space: input
+        address: 60
+        data_type: float32
+      total_power_factor:
+        space: input
+        address: 62
+        data_type: float32
+      frequency:
+        space: input
+        address: 70
+        data_type: float32
+      import_active_energy:
+        space: input
+        address: 72
+        data_type: float32
+      export_active_energy:
+        space: input
+        address: 74
+        data_type: float32
+      import_reactive_energy:
+        space: input
+        address: 76
+        data_type: float32
+      voltage_l1_l2:
+        space: input
+        address: 200
+        data_type: float32
+      voltage_l2_l3:
+        space: input
+        address: 202
+        data_type: float32
+      voltage_l3_l1:
+        space: input
+        address: 204
+        data_type: float32
+      neutral_current:
+        space: input
+        address: 224
+        data_type: float32
+      undervoltage_l1:
+        space: discrete
+        address: 0
+      overvoltage_l1:
+        space: discrete
+        address: 1
+      overcurrent_l1:
+        space: discrete
+        address: 2
+      low_power_factor:
+        space: discrete
+        address: 3
+      neutral_current_high:
+        space: discrete
+        address: 4
 
 alarms:
   - name: "Undervoltage L1"
@@ -186,6 +447,90 @@ alarms:
   - name: "Overvoltage L1"
     severity: warning
     trigger: overvoltage_l1
+  - name: "Overcurrent L1"
+    severity: critical
+    trigger: overcurrent_l1
   - name: "Low Power Factor"
     severity: info
     trigger: low_power_factor
+  - name: "Neutral Current High"
+    severity: warning
+    trigger: neutral_current_high
+
+scenarios:
+  - id: voltage-sag
+    name: Voltage Sag
+    description: >
+      Phase 1 sags below 90 % of nominal and recovers. Tests undervoltage
+      detection and float32 decoding on the client side.
+    steps:
+      - at: 0
+        action: set_point
+        point: voltage_l1_n
+        value: 230.4
+      - at: 5
+        action: set_point
+        point: voltage_l1_n
+        value: 212.0
+      - at: 10
+        action: set_point
+        point: voltage_l1_n
+        value: 198.5
+      - at: 30
+        action: set_point
+        point: voltage_l1_n
+        value: 230.4
+
+  - id: phase-imbalance
+    name: Phase Imbalance
+    description: >
+      One phase takes most of the load, neutral current climbs, and the
+      imbalance flag fires.
+    steps:
+      - at: 0
+        action: set_point
+        point: current_l1
+        value: 34.0
+      - at: 0
+        action: set_point
+        point: current_l3
+        value: 8.0
+      - at: 0
+        action: set_point
+        point: neutral_current
+        value: 12.4
+      - at: 60
+        action: set_point
+        point: current_l1
+        value: 21.4
+      - at: 60
+        action: set_point
+        point: current_l3
+        value: 22.8
+      - at: 60
+        action: set_point
+        point: neutral_current
+        value: 1.8
+
+  - id: reactive-load-step
+    name: Reactive Load Step
+    description: >
+      A large inductive load lands: reactive power jumps and the power factor
+      drops under the utility limit.
+    steps:
+      - at: 0
+        action: set_point
+        point: total_reactive_power
+        value: 9800.0
+      - at: 0
+        action: set_point
+        point: total_power_factor
+        value: 0.78
+      - at: 45
+        action: set_point
+        point: total_reactive_power
+        value: 3120.0
+      - at: 45
+        action: set_point
+        point: total_power_factor
+        value: 0.96

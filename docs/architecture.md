@@ -99,7 +99,7 @@ crate; contracts are in this folder):
 | `engine` | `cargo test -p engine` | `src/behaviors.rs`, `src/encode.rs`; `tests/engine.rs` |
 | `control` | `cargo test -p control` | `tests/http.rs` (probes, PATCH, faults, scenarios, API key, SSE) |
 | `modbus` | `cargo test -p modbus --locked` | FC1–FC4 / 5 / 6 / 15 / 16, exceptions 02 / 03, FC3 over TLS |
-| `opcua` | `cargo test -p opcua --locked` | T&H `holding/temperature` over Anonymous/None |
+| `opcua` | `cargo test -p opcua --locked` | T&H point `temperature` over Anonymous/None |
 | `bacnet` | `cargo test -p bacnet --locked` | Language-2 fixture: Who-Is, ReadProperty on an Analog Input, WriteProperty on an Analog Value |
 | `runtime` (`-p simbus`) | `cargo test -p simbus --locked` | clap (`--file`, `--tick`, `--time-scale`, `--seed`, TLS/UA flags, `check`, `ctl`); default template |
 

@@ -90,6 +90,27 @@ async fn config_uses_snake_case_endianness() {
 }
 
 #[tokio::test]
+async fn config_lists_declared_bindings() {
+    let response = app()
+        .oneshot(Request::get("/config").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    let body = response.into_body().collect().await.unwrap().to_bytes();
+    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    let bindings = json["bindings"].as_array().unwrap();
+    assert_eq!(bindings.len(), 1, "T&H binds Modbus TCP only: {json}");
+    let tcp = &bindings[0];
+    assert_eq!(tcp["protocol"], "modbus-tcp");
+    // The YAML port, not the 5020 the process is listening on.
+    assert_eq!(tcp["port"], 502);
+    assert_eq!(tcp["unit_id"], 1);
+    assert_eq!(tcp["endianness"], "big");
+    assert_eq!(tcp["implemented"], true);
+    assert!(tcp["points"].as_u64().unwrap() >= 3);
+    assert!(tcp["device_instance"].is_null());
+}
+
+#[tokio::test]
 async fn lists_bundled_scenarios() {
     let response = app()
         .oneshot(Request::get("/scenarios").body(Body::empty()).unwrap())

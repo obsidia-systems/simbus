@@ -173,10 +173,9 @@ simbus --file device.yaml
 # UA Expert: opc.tcp://127.0.0.1:4840  (accept None / Anonymous)
 ```
 
-NodeIds are `ns=N;s={point-id}` under Input/Value/Output folders on a
-language-2 document, and `ns=N;s=holding/{name}` (plus `input/`, `coils/`,
-`discrete/`) on a language-1 register map. Values are engineering units (T&H
-temperature ≈ 22.5). Compose does not publish 4840 by default; add
+NodeIds are `ns=N;s={point-id}` under Input/Value/Output folders. (A
+language-1 document — none ship here — answers at `ns=N;s=holding/{name}`
+instead.) Values are engineering units (T&H temperature ≈ 22.5). Compose does not publish 4840 by default; add
 `4840:4840` when you want the lab.
 
 ### BACnet/IP (IANA 47808)
@@ -239,22 +238,27 @@ simbus --file devices/community/papouch-th2e.yaml
 ```
 
 Seven product-shaped templates ship ready to use, plus `devices/builtin/default.yaml`
-(the zero-arg example device, not a product). Each product template has a realistic
-register map, trigger-based alarms, and physics-appropriate simulation.
+(the zero-arg example device, not a product). Every template is language 2, and its
+point set follows what that class of equipment actually publishes to a BMS or SCADA
+head end — the same ids, units, spaces, and data types, with trigger-based alarms and
+physics-appropriate simulation.
 
 Host ports below are the `docker-compose.yml` mappings. Inside the container every
 generic template listens on Modbus `502` and HTTP `8000`. Compose is not required
 for local `cargo run`.
 
-| Device | YAML | Example host map | Holding | Coils |
+| Device | YAML | Example host map | Points | Modelled on |
 | --- | --- | --- | --- | --- |
-| 🌡️ T&H Sensor | `devices/builtin/generic-tnh-sensor.yaml` | `5020:502`, `8000:8000` | 2 | 2 |
-| 🔋 UPS | `devices/builtin/generic-ups.yaml` | `5021:502`, `8001:8000` | 6 | 4 |
-| ⚡ PDU | `devices/builtin/generic-pdu.yaml` | `5022:502`, `8002:8000` | 6 | 3 |
-| ❄️ CRAC Unit | `devices/builtin/generic-crac.yaml` | `5023:502`, `8003:8000` | 6 | 4 + 1 discrete |
-| 📊 Power Meter | `devices/builtin/generic-power-meter.yaml` | `5024:502`, `8004:8000` | 12 | 3 |
-| 💧 Leak Sensor | `devices/builtin/generic-leak-sensor.yaml` | `5025:502`, `8005:8000` | 4 | 3 + 1 discrete |
-| 🚪 Door Contact | `devices/builtin/generic-door-contact.yaml` | `5026:502`, `8006:8000` | 3 | 4 + 2 discrete |
+| 🌡️ T&H Sensor | `devices/builtin/generic-tnh-sensor.yaml` | `5020:502`, `8000:8000` | 7 | Industrial T&H transmitters (Vaisala, E+E): T, RH, dew point, alert flags |
+| 🔋 UPS | `devices/builtin/generic-ups.yaml` | `5021:502`, `8001:8000` | 23 | RFC 1628 UPS MIB object set |
+| ⚡ PDU | `devices/builtin/generic-pdu.yaml` | `5022:502`, `8002:8000` | 22 | Switched/metered rack PDUs (Raritan PX, ServerTech Xerus) |
+| ❄️ CRAC Unit | `devices/builtin/generic-crac.yaml` | `5023:502`, `8003:8000` | 24 | Precision cooling controllers (Liebert iCOM, Stulz) |
+| 📊 Power Meter | `devices/builtin/generic-power-meter.yaml` | `5024:502`, `8004:8000` | 28 | Eastron SDM630 float32 map, at the vendor addresses |
+| 💧 Leak Sensor | `devices/builtin/generic-leak-sensor.yaml` | `5025:502`, `8005:8000` | 14 | Locating leak panels (TTK FG-NET, RLE): zone + distance in metres |
+| 🚪 Door Contact | `devices/builtin/generic-door-contact.yaml` | `5026:502`, `8006:8000` | 12 | Supervised door monitoring: ajar, forced entry, tamper, loop fault |
+
+Each file opens with a comment naming that nominal (voltage, frequency, rating) so you
+know what to change for a different service.
 
 `default.yaml` is not a Compose service. Papouch TH2E is community (`512` inside the
 container; host `5512–5515` / `8100–8103` with `--profile custom` or `--profile all`).
@@ -268,6 +272,11 @@ curl http://localhost:8000/config
 ```json
 {
   "name": "Generic T&H Sensor",
+  "spec_version": 2,
+  "bindings": [
+    {"protocol": "modbus-tcp", "port": 502, "unit_id": 1, "endianness": "big",
+     "device_instance": null, "points": 7, "implemented": true}
+  ],
   "registers": {
     "holding": [
       {"address": 0, "name": "temperature", "unit": "°C", "scale": 10,
@@ -282,6 +291,9 @@ curl http://localhost:8000/config
   }
 }
 ```
+
+`bindings` is the field plane the **document** declares (ports before any CLI
+override); `/status` reports what the process is actually listening on.
 
 ---
 
@@ -619,40 +631,48 @@ Minimal example (see spec.md for the full language):
 
 ```yaml
 name: "My Custom Sensor"
-spec_version: 1
+spec_version: 2
 version: "1.0"
 type: custom_sensor
 
-modbus:
-  default_port: 5030
-  unit_id: 1
-  endianness: big         # big | little | big_swap | little_swap
+points:
+  - id: pressure
+    kind: analog            # analog | binary
+    class: input            # input | value | output
+    description: "Line pressure"
+    unit: "PSI"
+    default: 100.0
+    simulation:
+      behavior: gaussian_noise
+      std_dev: 0.5
+      drift:
+        enabled: true
+        rate: 0.02
+        bounds: [50.0, 150.0]
 
-registers:
-  holding:
-    - address: 0
-      name: pressure
-      description: "Line pressure"
-      unit: "PSI"
-      default: 100.0
-      scale: 10            # raw = real_value × scale  →  100 PSI stored as 1000
-      data_type: uint16    # uint16 | int16 | uint32 | float32
-      simulation:
-        behavior: gaussian_noise
-        std_dev: 0.5
-        drift:
-          enabled: true
-          rate: 0.02
-          bounds: [50.0, 150.0]
+  - id: overpressure_alarm
+    kind: binary
+    class: input
+    default: false
+    trigger:
+      source: pressure
+      condition: gt         # gt | lt | eq | gte | lte
+      threshold: 130.0
 
-  coils:
-    - address: 0
-      name: overpressure_alarm
-      default: false
-      trigger:
-        source_register: pressure
-        condition: gt       # gt | lt | eq | gte | lte
-        threshold: 130.0
+bindings:
+  - protocol: modbus-tcp
+    port: 5030
+    unit_id: 1
+    endianness: big         # big | little | big_swap | little_swap
+    export:                 # nothing is published unless it is listed here
+      pressure:
+        space: holding      # holding | input | coil | discrete
+        address: 0
+        scale: 10           # raw = engineering × scale → 100 PSI stored as 1000
+        data_type: uint16   # uint16 | int16 | uint32 | float32
+      overpressure_alarm:
+        space: coil
+        address: 0
 
 alarms:
   - name: "Overpressure"
@@ -660,53 +680,9 @@ alarms:
     trigger: overpressure_alarm
 ```
 
-> Cross-references are validated at load time — if a coil trigger points to a non-existent
-> register, or an alarm references an unknown coil, simbus refuses to start with a clear error.
-
-```yaml
-name: "My Custom Sensor"
-version: "1.0"
-type: custom_sensor
-
-modbus:
-  default_port: 5030
-  unit_id: 1
-  endianness: big         # big | little | big_swap | little_swap
-
-registers:
-  holding:
-    - address: 0
-      name: pressure
-      description: "Line pressure"
-      unit: "PSI"
-      default: 100.0
-      scale: 10            # raw = real_value × scale  →  100 PSI stored as 1000
-      data_type: uint16    # uint16 | int16 | uint32 | float32
-      simulation:
-        behavior: gaussian_noise
-        std_dev: 0.5
-        drift:
-          enabled: true
-          rate: 0.02
-          bounds: [50.0, 150.0]
-
-  coils:
-    - address: 0
-      name: overpressure_alarm
-      default: false
-      trigger:
-        source_register: pressure
-        condition: gt       # gt | lt | eq | gte | lte
-        threshold: 130.0
-
-alarms:
-  - name: "Overpressure"
-    severity: critical      # info | warning | critical
-    trigger: overpressure_alarm
-```
-
-> Cross-references are validated at load time — if a coil trigger points to a non-existent
-> register, or an alarm references an unknown coil, simbus refuses to start with a clear error.
+> Cross-references are validated at load time — if a trigger points to a non-existent
+> point, an alarm references an unknown binary, or an `export` names an id that is not
+> a point, simbus refuses to start with a clear error.
 
 ---
 

@@ -70,7 +70,8 @@ async fn reads_tnh_temperature_as_engineering_float() {
     );
 
     let ns = find_simbus_namespace(&session).await;
-    let node = NodeId::new(ns, "holding/temperature");
+    // Language 2 addresses points by id (`ns=N;s={id}`), not `holding/{name}`.
+    let node = NodeId::new(ns, "temperature");
     let values = session
         .read(&[node.into()], TimestampsToReturn::Neither, 0.0)
         .await

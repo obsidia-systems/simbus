@@ -2,8 +2,8 @@
 # engine — not a model of a specific field product. Copy this file or
 # point `--file` at another template under devices/builtin or devices/community.
 #
-# Language 2: canonical points, explicit protocol export. Other builtin maps
-# remain language 1 until rewritten.
+# Language 2: canonical points, explicit protocol export — same as every
+# other map under devices/.
 
 name: "Example Device"
 spec_version: 2

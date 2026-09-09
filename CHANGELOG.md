@@ -73,8 +73,31 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Changed
 
-- `devices/builtin/default.yaml` is language 2 (`points:` + Modbus `export`).
-  Other builtin and community maps stay language 1 in this cut.
+- Every map under `devices/` is language 2 (`points:` + Modbus `export`).
+  The seven product templates were rewritten against the point sets their
+  industries actually publish, and the point ids, units, spaces, and data
+  types moved with them: UPS on the RFC 1628 UPS MIB object set (charge,
+  runtime, seconds on battery, output source, the `upsAlarm*` flags); power
+  meter on the Eastron SDM630 float32 input-register map (same zero-based
+  addresses, so an existing SDM630 tag list reads it); PDU on the Raritan
+  PX / Server Technology Xerus shape (inlet float32 metering, per-outlet
+  current, one writable relay coil per outlet, overcurrent protector);
+  CRAC on the Liebert iCOM point list (return/supply air, writable
+  temperature / humidity / dew-point setpoints, capacity and fan percent,
+  filter and airflow alarms); leak detector on locating-panel semantics
+  (per-zone leak with distance in metres, cable-break supervision);
+  door contact on supervised access monitoring (position, ajar, forced
+  entry, request to exit, tamper, loop fault). T&H gained dew point and a
+  sensor-fault flag but kept `temperature` and `humidity` at holding 0–1,
+  scale 10. `devices/community/papouch-th2e.yaml` is language 2 with the
+  same wire layout as before (input 0/1/4/5/8/9, coils 0–3).
+  Reading a language-1 document is unchanged.
+- `GET /config` reports the declared field plane in `bindings`: protocol,
+  port, `unit_id` / `endianness` (Modbus TCP), `device_instance` (BACnet),
+  export row count, and whether this runtime implements the protocol. It is
+  the document view — CLI and env port overrides show in `/status`, not here.
+- The materialized register bank is ordered by address instead of by point
+  id, so `simbus check` and `GET /config.registers` read like a register map.
 - Boot is file-only: `--file` / `SIMBUS_YAML_PATH`, else the default template.
   There is no `--type` / `SIMBUS_DEVICE_TYPE` / `--devices-dir`. Official maps
   are templates you point `--file` at. The YAML field `type:` remains identity

@@ -64,15 +64,17 @@ curl -X PATCH http://localhost:8000/simulation -d '{"running": true}'
 
 The runner sorts steps by `at` (simulation seconds) and sleeps
 `at / time_scale` of wall clock without blocking the tick loop. Default
-scale is 1 (1:1). Step types: `set_point`, `set_register`, `inject_fault`,
-`set_coil`, `set_tick_interval` — see spec.md.
+scale is 1 (1:1). Step types: `set_point`, `inject_fault`,
+`set_tick_interval`, plus the address-oriented `set_register` / `set_coil`
+that language-1 documents used — see spec.md.
 
 ---
 
 ## Writing a new one
 
 1. Add a block with a kebab-case `id` to the device YAML.
-2. Point every `register_name` / `coil` at names that exist on **that** map.
+2. Drive the map with `set_point` and `inject_fault` (`point:`), naming ids
+   that exist on **that** document.
 3. Run `simbus check path/to/device.yaml`.
 4. Boot the device and `POST /scenarios/{id}/run`.
 

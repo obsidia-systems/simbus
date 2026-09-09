@@ -1,172 +1,517 @@
+# Generic on-line UPS.
+#
+# Point names and units follow the standard UPS MIB (IETF RFC 1628), which is
+# what SCADA and DCIM tools expect from any vendor (APC, Eaton, Vertiv,
+# Riello): battery charge and runtime remaining, seconds on battery, battery
+# voltage/current/temperature, input and output volts/amps/hertz/watts, output
+# percent load, and the alarm set (on battery, low battery, depleted,
+# overload, temperature, bypass, battery bad, fan failure).
+#
+# Nominal: 230 V / 50 Hz single-phase, 6 kVA frame. For a 120 V / 60 Hz lab,
+# change the voltage and frequency defaults and the alert thresholds.
+#
+# Measurements are read-only input registers (FC4). The two configuration
+# points are holding registers (FC3/FC6) so a client can write them.
+
 name: "Generic UPS"
-spec_version: 1
-version: "1.0"
+spec_version: 2
+version: "1.1"
 type: ups
 description: >
-  Generic uninterruptible power supply simulator.
-  Models battery state-of-charge, input/output voltage, load percentage,
-  and runtime remaining — common registers on APC, Eaton, and Vertiv UPS units.
+  Uninterruptible power supply modelled on the RFC 1628 UPS MIB object set.
+  Battery state of charge, runtime remaining, input/output electrical values,
+  and the standard UPS alarm flags.
 
-modbus:
-  default_port: 502
-  unit_id: 1
-  endianness: big
+identity:
+  vendor: Obsidia
+  product: Generic UPS
+  revision: "1.1"
 
-registers:
-  holding:
-    - address: 0
-      name: battery_soc
-      description: "Battery state of charge"
-      unit: "%"
-      default: 100.0
-      scale: 10
-      data_type: uint16
-      simulation:
-        behavior: drift
-        rate: -0.005         # slow discharge (~1% per 200 simulation seconds)
-        bounds: [0.0, 100.0]
+points:
+  # ---- Input group (RFC 1628 upsInput) ----------------------------------
+  - id: input_voltage
+    kind: analog
+    class: input
+    description: "Utility input voltage, RMS (upsInputVoltage)"
+    unit: "V"
+    default: 230.0
+    simulation:
+      behavior: gaussian_noise
+      std_dev: 0.6
 
-    - address: 1
-      name: input_voltage
-      description: "AC input voltage"
-      unit: "V"
-      default: 120.0
-      scale: 10
-      data_type: uint16
-      simulation:
-        behavior: gaussian_noise
-        std_dev: 0.5
+  - id: input_frequency
+    kind: analog
+    class: input
+    description: "Utility input frequency (upsInputFrequency)"
+    unit: "Hz"
+    default: 50.0
+    simulation:
+      behavior: gaussian_noise
+      std_dev: 0.05
 
-    - address: 2
-      name: output_voltage
-      description: "AC output voltage"
-      unit: "V"
-      default: 120.0
-      scale: 10
-      data_type: uint16
-      simulation:
-        behavior: gaussian_noise
-        std_dev: 0.2
+  # ---- Output group (RFC 1628 upsOutput) --------------------------------
+  - id: output_voltage
+    kind: analog
+    class: input
+    description: "Output voltage, RMS (upsOutputVoltage)"
+    unit: "V"
+    default: 230.0
+    simulation:
+      behavior: gaussian_noise
+      std_dev: 0.3
 
-    - address: 3
-      name: load_percent
-      description: "Output load as percentage of capacity"
-      unit: "%"
-      default: 45.0
-      scale: 10
-      data_type: uint16
-      simulation:
-        behavior: sinusoidal
-        period_hours: 2
-        amplitude: 10.0
+  - id: output_current
+    kind: analog
+    class: input
+    description: "Output current, RMS (upsOutputCurrent)"
+    unit: "A"
+    default: 11.7
+    simulation:
+      behavior: sinusoidal
+      period_hours: 2
+      amplitude: 1.8
 
-    - address: 4
-      name: runtime_remaining
-      description: "Estimated runtime remaining on battery"
-      unit: "min"
-      default: 60.0
-      scale: 1
-      data_type: uint16
-      simulation:
-        behavior: drift
-        rate: -0.01
-        bounds: [0.0, 120.0]
+  - id: output_frequency
+    kind: analog
+    class: input
+    description: "Output frequency (upsOutputFrequency)"
+    unit: "Hz"
+    default: 50.0
+    simulation:
+      behavior: gaussian_noise
+      std_dev: 0.02
 
-    - address: 5
-      name: battery_temp
-      description: "Internal battery temperature"
-      unit: "°C"
-      default: 25.0
-      scale: 10
-      data_type: uint16
-      simulation:
-        behavior: gaussian_noise
-        std_dev: 0.2
+  - id: output_power
+    kind: analog
+    class: input
+    description: "Output true power (upsOutputPower)"
+    unit: "W"
+    default: 2600.0
+    simulation:
+      behavior: sinusoidal
+      period_hours: 2
+      amplitude: 300.0
 
-  coils:
-    - address: 0
-      name: on_battery
-      description: "UPS is running on battery (utility lost)"
-      default: false
+  - id: output_load
+    kind: analog
+    class: input
+    description: "Output load as percent of capacity (upsOutputPercentLoad)"
+    unit: "%"
+    default: 45.0
+    simulation:
+      behavior: sinusoidal
+      period_hours: 2
+      amplitude: 10.0
 
-    - address: 1
-      name: low_battery_alarm
-      description: "Battery state of charge critically low"
-      default: false
-      trigger:
-        source_register: battery_soc
-        condition: lt
-        threshold: 20.0
+  # ---- Battery group (RFC 1628 upsBattery) ------------------------------
+  - id: battery_charge
+    kind: analog
+    class: input
+    description: "Battery charge remaining (upsEstimatedChargeRemaining)"
+    unit: "%"
+    default: 100.0
+    simulation:
+      behavior: drift
+      rate: -0.005          # ~1 % per 200 simulation seconds
+      bounds: [0.0, 100.0]
 
-    - address: 2
-      name: overload_alarm
-      description: "Output load exceeds safe threshold"
-      default: false
-      trigger:
-        source_register: load_percent
-        condition: gt
-        threshold: 90.0
+  - id: battery_runtime
+    kind: analog
+    class: input
+    description: "Runtime remaining at present load (upsEstimatedMinutesRemaining)"
+    unit: "min"
+    default: 62.0
+    simulation:
+      behavior: drift
+      rate: -0.01
+      bounds: [0.0, 120.0]
 
-    - address: 3
-      name: high_battery_temp_alarm
-      description: "Battery temperature above safe limit"
-      default: false
-      trigger:
-        source_register: battery_temp
-        condition: gt
-        threshold: 40.0
+  - id: battery_voltage
+    kind: analog
+    class: input
+    description: "Battery string voltage (upsBatteryVoltage)"
+    unit: "V"
+    default: 274.0
+    simulation:
+      behavior: gaussian_noise
+      std_dev: 0.4
+
+  - id: battery_current
+    kind: analog
+    class: input
+    description: "Battery current, negative while charging (upsBatteryCurrent)"
+    unit: "A"
+    default: -0.4
+    simulation:
+      behavior: gaussian_noise
+      std_dev: 0.2
+
+  - id: battery_temperature
+    kind: analog
+    class: input
+    description: "Battery compartment temperature (upsBatteryTemperature)"
+    unit: "°C"
+    default: 25.0
+    simulation:
+      behavior: gaussian_noise
+      std_dev: 0.2
+
+  - id: seconds_on_battery
+    kind: analog
+    class: input
+    description: "Elapsed time on battery, 0 while on utility (upsSecondsOnBattery)"
+    unit: "s"
+    default: 0.0
+    simulation:
+      behavior: constant
+
+  # ---- Configuration and mode (writable) --------------------------------
+  - id: output_source
+    kind: analog
+    class: value
+    description: >
+      Present source of output power (upsOutputSource): 1 other, 2 none,
+      3 normal, 4 bypass, 5 battery, 6 booster, 7 reducer.
+    unit: ""
+    default: 3.0
+    simulation:
+      behavior: constant
+
+  - id: low_battery_time
+    kind: analog
+    class: value
+    description: "Runtime at which low battery is declared (upsConfigLowBattTime)"
+    unit: "min"
+    default: 5.0
+    simulation:
+      behavior: constant
+
+  # ---- Alarms (RFC 1628 upsAlarm*) --------------------------------------
+  - id: on_battery
+    kind: binary
+    class: input
+    description: "Utility lost, load on battery (upsAlarmOnBattery)"
+    default: false
+    trigger:
+      source: input_voltage
+      condition: lt
+      threshold: 180.0
+
+  - id: low_battery
+    kind: binary
+    class: input
+    description: "Battery charge below the low limit (upsAlarmLowBattery)"
+    default: false
+    trigger:
+      source: battery_charge
+      condition: lt
+      threshold: 20.0
+
+  - id: battery_depleted
+    kind: binary
+    class: input
+    description: "Battery cannot sustain the present load (batteryDepleted)"
+    default: false
+    trigger:
+      source: battery_charge
+      condition: lt
+      threshold: 5.0
+
+  - id: output_overload
+    kind: binary
+    class: input
+    description: "Output load above the overload limit (upsAlarmOutputOverload)"
+    default: false
+    trigger:
+      source: output_load
+      condition: gt
+      threshold: 90.0
+
+  - id: high_battery_temp
+    kind: binary
+    class: input
+    description: "Battery temperature above the safe limit (upsAlarmTempBad)"
+    default: false
+    trigger:
+      source: battery_temperature
+      condition: gt
+      threshold: 40.0
+
+  - id: on_bypass
+    kind: binary
+    class: value
+    description: "Load served through static bypass (upsAlarmOnBypass)"
+    default: false
+
+  - id: battery_bad
+    kind: binary
+    class: value
+    description: "Battery needs replacement (upsAlarmBatteryBad)"
+    default: false
+
+  - id: fan_failure
+    kind: binary
+    class: value
+    description: "Cooling fan failure (upsAlarmFanFailure)"
+    default: false
+
+bindings:
+  - protocol: modbus-tcp
+    port: 502
+    unit_id: 1
+    endianness: big
+    export:
+      input_voltage:
+        space: input
+        address: 0
+        scale: 10             # RFC 1628 reports volts in 0.1 V steps
+        data_type: uint16
+      input_frequency:
+        space: input
+        address: 1
+        scale: 100
+        data_type: uint16
+      output_voltage:
+        space: input
+        address: 2
+        scale: 10
+        data_type: uint16
+      output_current:
+        space: input
+        address: 3
+        scale: 10
+        data_type: uint16
+      output_frequency:
+        space: input
+        address: 4
+        scale: 100
+        data_type: uint16
+      output_power:
+        space: input
+        address: 5
+        scale: 1
+        data_type: uint16
+      output_load:
+        space: input
+        address: 6
+        scale: 1
+        data_type: uint16
+      battery_charge:
+        space: input
+        address: 7
+        scale: 1
+        data_type: uint16
+      battery_runtime:
+        space: input
+        address: 8
+        scale: 1
+        data_type: uint16
+      battery_voltage:
+        space: input
+        address: 9
+        scale: 10
+        data_type: uint16
+      battery_current:
+        space: input
+        address: 10
+        scale: 10
+        data_type: int16      # signed: negative while charging
+      battery_temperature:
+        space: input
+        address: 11
+        scale: 10
+        data_type: int16
+      seconds_on_battery:
+        space: input
+        address: 12
+        scale: 1
+        data_type: uint32     # occupies 12 and 13
+      output_source:
+        space: holding
+        address: 0
+        scale: 1
+        data_type: uint16
+      low_battery_time:
+        space: holding
+        address: 1
+        scale: 1
+        data_type: uint16
+      on_battery:
+        space: discrete
+        address: 0
+      low_battery:
+        space: discrete
+        address: 1
+      battery_depleted:
+        space: discrete
+        address: 2
+      output_overload:
+        space: discrete
+        address: 3
+      high_battery_temp:
+        space: discrete
+        address: 4
+      on_bypass:
+        space: coil
+        address: 0
+      battery_bad:
+        space: coil
+        address: 1
+      fan_failure:
+        space: coil
+        address: 2
 
 alarms:
+  - name: "On Battery"
+    severity: warning
+    trigger: on_battery
   - name: "Low Battery"
     severity: critical
-    trigger: low_battery_alarm
-  - name: "Overload"
+    trigger: low_battery
+  - name: "Battery Depleted"
     severity: critical
-    trigger: overload_alarm
+    trigger: battery_depleted
+  - name: "Output Overload"
+    severity: critical
+    trigger: output_overload
   - name: "High Battery Temperature"
     severity: warning
-    trigger: high_battery_temp_alarm
+    trigger: high_battery_temp
+  - name: "On Bypass"
+    severity: warning
+    trigger: on_bypass
+  - name: "Battery Needs Replacement"
+    severity: warning
+    trigger: battery_bad
+  - name: "Fan Failure"
+    severity: critical
+    trigger: fan_failure
 
 scenarios:
   - id: power-outage
-    name: UPS Power Failure
+    name: Utility Power Failure
     description: >
-      Mains drops, UPS switches to battery, then drains toward shutdown.
-      Tests on-battery and low-battery alarm firing sequence.
+      Utility drops, the UPS transfers to battery, the string drains toward
+      shutdown, then utility returns. on_battery, low_battery, and
+      battery_depleted fire from their triggers as the values move.
     steps:
       - at: 0
-        action: set_register
-        register_name: input_voltage
+        action: set_point
+        point: input_voltage
         value: 0.0
-      - at: 2
-        action: set_coil
-        coil: on_battery
-        value: true
+      - at: 0
+        action: set_point
+        point: output_source
+        value: 5.0            # battery
       - at: 5
-        action: set_register
-        register_name: battery_soc
+        action: set_point
+        point: battery_charge
         value: 80.0
-      - at: 60
-        action: set_register
-        register_name: battery_soc
-        value: 50.0
-      - at: 120
-        action: set_register
-        register_name: battery_soc
-        value: 20.0
-      - at: 125
-        action: set_coil
-        coil: low_battery_alarm
-        value: true
-      - at: 180
-        action: set_register
-        register_name: battery_soc
+      - at: 5
+        action: set_point
+        point: seconds_on_battery
         value: 5.0
+      - at: 60
+        action: set_point
+        point: battery_charge
+        value: 50.0
+      - at: 60
+        action: set_point
+        point: battery_runtime
+        value: 30.0
+      - at: 120
+        action: set_point
+        point: battery_charge
+        value: 18.0
+      - at: 120
+        action: set_point
+        point: battery_runtime
+        value: 9.0
+      - at: 180
+        action: set_point
+        point: battery_charge
+        value: 4.0
       - at: 200
-        action: set_coil
-        coil: on_battery
-        value: false
+        action: set_point
+        point: input_voltage
+        value: 230.0
       - at: 200
-        action: set_coil
-        coil: low_battery_alarm
+        action: set_point
+        point: output_source
+        value: 3.0            # normal
+      - at: 200
+        action: set_point
+        point: seconds_on_battery
+        value: 0.0
+      - at: 210
+        action: set_point
+        point: battery_charge
+        value: 100.0
+      - at: 210
+        action: set_point
+        point: battery_runtime
+        value: 62.0
+
+  - id: overload-transfer-to-bypass
+    name: Overload To Bypass
+    description: >
+      Load climbs past the overload limit and the UPS drops to static bypass.
+      Tests overload escalation and bypass reporting.
+    steps:
+      - at: 0
+        action: set_point
+        point: output_load
+        value: 78.0
+      - at: 10
+        action: set_point
+        point: output_load
+        value: 94.0
+      - at: 10
+        action: set_point
+        point: output_current
+        value: 24.5
+      - at: 15
+        action: set_point
+        point: on_bypass
+        value: true
+      - at: 15
+        action: set_point
+        point: output_source
+        value: 4.0            # bypass
+      - at: 60
+        action: set_point
+        point: output_load
+        value: 45.0
+      - at: 60
+        action: set_point
+        point: on_bypass
         value: false
+      - at: 60
+        action: set_point
+        point: output_source
+        value: 3.0
+
+  - id: battery-end-of-life
+    name: Battery End Of Life
+    description: >
+      A weak string: runtime collapses under normal load and the UPS asks for
+      a battery replacement while temperature rises.
+    steps:
+      - at: 0
+        action: set_point
+        point: battery_runtime
+        value: 8.0
+      - at: 0
+        action: set_point
+        point: battery_bad
+        value: true
+      - at: 10
+        action: set_point
+        point: battery_temperature
+        value: 43.0
+      - at: 30
+        action: inject_fault
+        fault_type: noise_amplify
+        point: battery_voltage
+        value: 8.0
+        duration_s: 30

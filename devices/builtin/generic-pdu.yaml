@@ -1,130 +1,443 @@
+# Generic switched, metered rack PDU.
+#
+# Point set follows what intelligent rack PDUs publish over Modbus (Raritan
+# PX2/PX3, Server Technology Xerus, APC NetShelter): per-inlet RMS voltage
+# and current, peak and unbalanced current, active and apparent power, power
+# factor, line frequency, an active-energy counter, per-outlet current, one
+# writable relay coil per switched outlet, and overcurrent-protector status.
+# Those products carry the electrical readings as float32 register pairs, so
+# this map does the same.
+#
+# Nominal: single-phase 230 V, 32 A inlet, four switched outlets. A real
+# 24- or 48-outlet PDU repeats the outlet block; a vendor-exact clone belongs
+# in devices/community/.
+
 name: "Generic PDU"
-spec_version: 1
-version: "1.0"
+spec_version: 2
+version: "1.1"
 type: pdu
 description: >
-  Generic power distribution unit simulator.
-  Models per-bank current draw, total power, and inlet voltage —
-  typical of Raritan, Vertiv, and APC rack PDUs in data center deployments.
+  Switched, metered rack power distribution unit. Inlet electrical metering,
+  per-outlet current, outlet relay control, and breaker/overcurrent status.
 
-modbus:
-  default_port: 502
-  unit_id: 1
-  endianness: big
+identity:
+  vendor: Obsidia
+  product: Generic PDU
+  revision: "1.1"
 
-registers:
-  holding:
-    - address: 0
-      name: inlet_voltage
-      description: "Inlet AC voltage"
-      unit: "V"
-      default: 208.0
-      scale: 10
-      data_type: uint16
-      simulation:
-        behavior: gaussian_noise
-        std_dev: 0.5
+points:
+  # ---- Inlet metering --------------------------------------------------
+  - id: inlet_voltage
+    kind: analog
+    class: input
+    description: "Inlet RMS voltage"
+    unit: "V"
+    default: 230.2
+    simulation:
+      behavior: gaussian_noise
+      std_dev: 0.5
 
-    - address: 1
-      name: bank_a_current
-      description: "Current draw on bank A"
-      unit: "A"
-      default: 8.0
-      scale: 100
-      data_type: uint16
-      simulation:
-        behavior: gaussian_noise
-        std_dev: 0.2
-        drift:
-          enabled: true
-          rate: 0.002
-          bounds: [0.0, 16.0]
+  - id: inlet_current
+    kind: analog
+    class: input
+    description: "Inlet RMS current"
+    unit: "A"
+    default: 12.4
+    simulation:
+      behavior: gaussian_noise
+      std_dev: 0.25
+      drift:
+        enabled: true
+        rate: 0.002
+        bounds: [0.0, 32.0]
 
-    - address: 2
-      name: bank_b_current
-      description: "Current draw on bank B"
-      unit: "A"
-      default: 6.5
-      scale: 100
-      data_type: uint16
-      simulation:
-        behavior: gaussian_noise
-        std_dev: 0.2
-        drift:
-          enabled: true
-          rate: 0.001
-          bounds: [0.0, 16.0]
+  - id: inlet_peak_current
+    kind: analog
+    class: input
+    description: "Peak inlet current since the last reset"
+    unit: "A"
+    default: 18.6
+    simulation:
+      behavior: constant
 
-    - address: 3
-      name: total_power
-      description: "Total active power consumed"
-      unit: "W"
-      default: 3000.0
-      scale: 1
-      data_type: uint16
-      simulation:
-        behavior: sinusoidal
-        period_hours: 4
-        amplitude: 300.0
+  - id: inlet_frequency
+    kind: analog
+    class: input
+    description: "Inlet line frequency"
+    unit: "Hz"
+    default: 50.0
+    simulation:
+      behavior: gaussian_noise
+      std_dev: 0.03
 
-    - address: 4
-      name: total_energy
-      description: "Cumulative energy consumption"
-      unit: "kWh"
-      default: 0.0
-      scale: 10
-      data_type: uint16
-      simulation:
-        behavior: drift
-        rate: 0.001
-        bounds: [0.0, 6553.5]
+  - id: inlet_active_power
+    kind: analog
+    class: input
+    description: "Inlet active power"
+    unit: "W"
+    default: 2760.0
+    simulation:
+      behavior: sinusoidal
+      period_hours: 4
+      amplitude: 280.0
 
-    - address: 5
-      name: pdu_temp
-      description: "PDU internal temperature"
-      unit: "°C"
-      default: 28.0
-      scale: 10
-      data_type: uint16
-      simulation:
-        behavior: gaussian_noise
-        std_dev: 0.3
+  - id: inlet_apparent_power
+    kind: analog
+    class: input
+    description: "Inlet apparent power"
+    unit: "VA"
+    default: 2854.0
+    simulation:
+      behavior: sinusoidal
+      period_hours: 4
+      amplitude: 280.0
 
-  coils:
-    - address: 0
-      name: bank_a_overcurrent
-      description: "Bank A current exceeds rated limit"
-      default: false
-      trigger:
-        source_register: bank_a_current
-        condition: gt
-        threshold: 14.0
+  - id: inlet_power_factor
+    kind: analog
+    class: input
+    description: "Inlet power factor (0.00–1.00)"
+    unit: ""
+    default: 0.97
+    simulation:
+      behavior: gaussian_noise
+      std_dev: 0.004
 
-    - address: 1
-      name: bank_b_overcurrent
-      description: "Bank B current exceeds rated limit"
-      default: false
-      trigger:
-        source_register: bank_b_current
-        condition: gt
-        threshold: 14.0
+  - id: inlet_active_energy
+    kind: analog
+    class: input
+    description: "Inlet active energy counter"
+    unit: "kWh"
+    default: 18425.7
+    simulation:
+      # 0.0008 kWh/s = 2.88 kW, the load on this inlet. The engine spreads a
+      # drift channel's starting value by 2 % of the span, so keep the bounds
+      # close to the default instead of using the counter's full range.
+      behavior: drift
+      rate: 0.0008
+      bounds: [18425.7, 18500.0]
 
-    - address: 2
-      name: high_pdu_temp
-      description: "PDU temperature above safe threshold"
-      default: false
-      trigger:
-        source_register: pdu_temp
-        condition: gt
-        threshold: 45.0
+  - id: inlet_utilization
+    kind: analog
+    class: input
+    description: "Inlet current as percent of the 32 A rating"
+    unit: "%"
+    default: 38.8
+    simulation:
+      behavior: sinusoidal
+      period_hours: 4
+      amplitude: 6.0
+
+  # ---- Environment (external sensor port) ------------------------------
+  - id: pdu_temperature
+    kind: analog
+    class: input
+    description: "Temperature at the PDU sensor port"
+    unit: "°C"
+    default: 28.0
+    simulation:
+      behavior: gaussian_noise
+      std_dev: 0.3
+
+  # ---- Per-outlet metering ---------------------------------------------
+  - id: outlet_1_current
+    kind: analog
+    class: input
+    description: "Outlet 1 RMS current"
+    unit: "A"
+    default: 3.8
+    simulation:
+      behavior: gaussian_noise
+      std_dev: 0.1
+
+  - id: outlet_2_current
+    kind: analog
+    class: input
+    description: "Outlet 2 RMS current"
+    unit: "A"
+    default: 3.2
+    simulation:
+      behavior: gaussian_noise
+      std_dev: 0.1
+
+  - id: outlet_3_current
+    kind: analog
+    class: input
+    description: "Outlet 3 RMS current"
+    unit: "A"
+    default: 2.9
+    simulation:
+      behavior: gaussian_noise
+      std_dev: 0.1
+
+  - id: outlet_4_current
+    kind: analog
+    class: input
+    description: "Outlet 4 RMS current"
+    unit: "A"
+    default: 2.5
+    simulation:
+      behavior: gaussian_noise
+      std_dev: 0.1
+
+  # ---- Outlet relays (writable) ----------------------------------------
+  - id: outlet_1
+    kind: binary
+    class: output
+    description: "Outlet 1 relay: true = switched on"
+    default: true
+
+  - id: outlet_2
+    kind: binary
+    class: output
+    description: "Outlet 2 relay: true = switched on"
+    default: true
+
+  - id: outlet_3
+    kind: binary
+    class: output
+    description: "Outlet 3 relay: true = switched on"
+    default: true
+
+  - id: outlet_4
+    kind: binary
+    class: output
+    description: "Outlet 4 relay: true = switched on"
+    default: true
+
+  # ---- Protection and alerts -------------------------------------------
+  - id: inlet_overcurrent
+    kind: binary
+    class: input
+    description: "Inlet current above 90 % of the 32 A rating"
+    default: false
+    trigger:
+      source: inlet_current
+      condition: gt
+      threshold: 28.8
+
+  - id: inlet_undervoltage
+    kind: binary
+    class: input
+    description: "Inlet voltage below 90 % of nominal"
+    default: false
+    trigger:
+      source: inlet_voltage
+      condition: lt
+      threshold: 207.0
+
+  - id: high_pdu_temperature
+    kind: binary
+    class: input
+    description: "PDU sensor temperature above the safe limit"
+    default: false
+    trigger:
+      source: pdu_temperature
+      condition: gt
+      threshold: 45.0
+
+  - id: breaker_tripped
+    kind: binary
+    class: value
+    description: "Overcurrent protector open (breaker tripped)"
+    default: false
+
+bindings:
+  - protocol: modbus-tcp
+    port: 502
+    unit_id: 1
+    endianness: big
+    export:
+      # Electrical readings are float32 pairs, as on the vendor PDUs.
+      inlet_voltage:
+        space: holding
+        address: 0
+        data_type: float32
+      inlet_current:
+        space: holding
+        address: 2
+        data_type: float32
+      inlet_peak_current:
+        space: holding
+        address: 4
+        data_type: float32
+      inlet_frequency:
+        space: holding
+        address: 6
+        data_type: float32
+      inlet_active_power:
+        space: holding
+        address: 8
+        data_type: float32
+      inlet_apparent_power:
+        space: holding
+        address: 10
+        data_type: float32
+      inlet_power_factor:
+        space: holding
+        address: 12
+        data_type: float32
+      inlet_active_energy:
+        space: holding
+        address: 14
+        data_type: float32
+      inlet_utilization:
+        space: holding
+        address: 16
+        data_type: float32
+      pdu_temperature:
+        space: holding
+        address: 18
+        data_type: float32
+      outlet_1_current:
+        space: holding
+        address: 20
+        data_type: float32
+      outlet_2_current:
+        space: holding
+        address: 22
+        data_type: float32
+      outlet_3_current:
+        space: holding
+        address: 24
+        data_type: float32
+      outlet_4_current:
+        space: holding
+        address: 26
+        data_type: float32
+      # Outlet relays: FC5 / FC15 writable coils, one per outlet.
+      outlet_1:
+        space: coil
+        address: 0
+      outlet_2:
+        space: coil
+        address: 1
+      outlet_3:
+        space: coil
+        address: 2
+      outlet_4:
+        space: coil
+        address: 3
+      breaker_tripped:
+        space: coil
+        address: 4
+      inlet_overcurrent:
+        space: discrete
+        address: 0
+      inlet_undervoltage:
+        space: discrete
+        address: 1
+      high_pdu_temperature:
+        space: discrete
+        address: 2
 
 alarms:
-  - name: "Bank A Overcurrent"
+  - name: "Inlet Overcurrent"
     severity: critical
-    trigger: bank_a_overcurrent
-  - name: "Bank B Overcurrent"
-    severity: critical
-    trigger: bank_b_overcurrent
+    trigger: inlet_overcurrent
+  - name: "Inlet Undervoltage"
+    severity: warning
+    trigger: inlet_undervoltage
   - name: "High PDU Temperature"
     severity: warning
-    trigger: high_pdu_temp
+    trigger: high_pdu_temperature
+  - name: "Breaker Tripped"
+    severity: critical
+    trigger: breaker_tripped
+
+scenarios:
+  - id: overcurrent-trip
+    name: Overcurrent Trip
+    description: >
+      Load climbs past 90 % of the inlet rating, the overcurrent flag fires,
+      then the breaker opens and the outlets drop.
+    steps:
+      - at: 0
+        action: set_point
+        point: inlet_current
+        value: 24.0
+      - at: 10
+        action: set_point
+        point: inlet_current
+        value: 29.5
+      - at: 10
+        action: set_point
+        point: inlet_utilization
+        value: 92.2
+      - at: 20
+        action: set_point
+        point: breaker_tripped
+        value: true
+      - at: 20
+        action: set_point
+        point: outlet_3
+        value: false
+      - at: 20
+        action: set_point
+        point: outlet_4
+        value: false
+      - at: 25
+        action: set_point
+        point: inlet_current
+        value: 6.7
+      - at: 25
+        action: set_point
+        point: inlet_utilization
+        value: 21.0
+      - at: 90
+        action: set_point
+        point: breaker_tripped
+        value: false
+      - at: 90
+        action: set_point
+        point: outlet_3
+        value: true
+      - at: 90
+        action: set_point
+        point: outlet_4
+        value: true
+
+  - id: outlet-power-cycle
+    name: Outlet Power Cycle
+    description: >
+      Remote reboot of the device on outlet 2: relay off, current drops to
+      zero, relay back on. Tests FC5 write handling and outlet telemetry.
+    steps:
+      - at: 0
+        action: set_point
+        point: outlet_2
+        value: false
+      - at: 0
+        action: set_point
+        point: outlet_2_current
+        value: 0.0
+      - at: 10
+        action: set_point
+        point: outlet_2
+        value: true
+      - at: 14
+        action: set_point
+        point: outlet_2_current
+        value: 4.1
+      - at: 30
+        action: set_point
+        point: outlet_2_current
+        value: 3.2
+
+  - id: feed-voltage-drop
+    name: Feed Voltage Drop
+    description: >
+      Upstream sag on the PDU feed. Tests undervoltage reporting while the
+      load current stays flat.
+    steps:
+      - at: 0
+        action: set_point
+        point: inlet_voltage
+        value: 214.0
+      - at: 8
+        action: set_point
+        point: inlet_voltage
+        value: 199.5
+      - at: 40
+        action: set_point
+        point: inlet_voltage
+        value: 230.2

@@ -23,6 +23,9 @@ Human front door: [README.md](README.md). Contracts live in `docs/` and win over
 ## Device maps
 
 Where files go (builtin vs community): [docs/spec.md](docs/spec.md) (maps table).
+Every shipped map is language 2, and each product template follows the point
+set its industry publishes (UPS on RFC 1628, power meter on the Eastron SDM630
+map, PDU on Raritan/ServerTech, CRAC on Liebert iCOM, leak on locating panels).
 - [devices/builtin/](devices/builtin/): `default.yaml` plus product-shaped templates (T&H, UPS, PDU, CRAC, power meter, leak, door).
 - [devices/community/](devices/community/): Contributor maps (example: Papouch TH2E).
 

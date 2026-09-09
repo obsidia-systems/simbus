@@ -21,10 +21,11 @@ folder, or a second schema. In a simbus checkout, read `docs/spec.md` first
 repository root, not from this skill folder.
 
 Language **2** is current (`points:` + explicit `export` on each binding).
-Language **1** (`registers:` holding/input/coils/discrete) still loads; the
-runtime lifts it to points. **New maps SHOULD use `spec_version: 2`.** Official
-product templates under `devices/builtin/` except `default.yaml` may still be
-language 1 until rewritten. Do not mix `points:` and `registers:` in one file.
+**Write `spec_version: 2`.** Every map shipped under `devices/` is language 2,
+so any file you copy is already in that form. Language **1** (`registers:`
+holding/input/coils/discrete) still loads and is lifted to points, for
+documents written against an earlier release; it cannot serve BACnet. Do not
+mix `points:` and `registers:` in one file.
 
 ## Where the file goes
 
@@ -41,17 +42,17 @@ runtime selector.
 
 Copy the closest builtin; do not start from a blank page.
 
-| Need | Start from |
-| --- | --- |
-| Tiny language-2 example | `devices/builtin/default.yaml` |
-| Temperature / humidity / analog env | `devices/builtin/generic-tnh-sensor.yaml` |
-| Leak / wet contact | `devices/builtin/generic-leak-sensor.yaml` |
-| Door / dry contact | `devices/builtin/generic-door-contact.yaml` |
-| UPS / battery | `devices/builtin/generic-ups.yaml` |
-| PDU / outlets | `devices/builtin/generic-pdu.yaml` |
-| kW / energy / PF | `devices/builtin/generic-power-meter.yaml` |
-| CRAC / cooling | `devices/builtin/generic-crac.yaml` |
-| Vendor PDF / odd port (e.g. 512) / input-only | `devices/community/papouch-th2e.yaml` |
+| Need | Start from | What it shows |
+| --- | --- | --- |
+| Tiny example, mixed behaviors | `devices/builtin/default.yaml` | The smallest complete document |
+| Temperature / humidity / analog env | `devices/builtin/generic-tnh-sensor.yaml` | Scaled `uint16`/`int16` holding, alert coils |
+| Leak / wet contact | `devices/builtin/generic-leak-sensor.yaml` | A binary that follows an analog (leak from distance) |
+| Door / dry contact | `devices/builtin/generic-door-contact.yaml` | Supervision flags, `cycle` behavior |
+| UPS / battery | `devices/builtin/generic-ups.yaml` | RFC 1628 point names, `uint32`, signed current |
+| PDU / outlets | `devices/builtin/generic-pdu.yaml` | `float32` metering, writable relay coils |
+| kW / energy / PF | `devices/builtin/generic-power-meter.yaml` | A real vendor map (Eastron SDM630) reproduced exactly |
+| CRAC / cooling | `devices/builtin/generic-crac.yaml` | Writable setpoints vs read-only measurements |
+| Vendor PDF / odd port (e.g. 512) / input-only | `devices/community/papouch-th2e.yaml` | A community clone with sparse addresses |
 
 ## Language 2 document
 
@@ -108,7 +109,7 @@ around `state.base`. `cycle` walks `values` every `dwell_seconds` (unlike
 `step`, which is an absolute `at` schedule). Drift `rate` is engineering
 units **per simulation second**.
 
-## Language 1 document (still valid)
+## Language 1 document (legacy, still loads)
 
 `name`, `version`, `type`, `modbus` (`default_port`, `unit_id`, `endianness`).
 `spec_version` omitted or `1`. Holding/input names unique across both spaces.

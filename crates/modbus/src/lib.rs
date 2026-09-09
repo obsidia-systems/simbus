@@ -352,8 +352,9 @@ registers:
 
     #[test]
     fn fc3_past_the_map_is_illegal_address() {
+        // The T&H map ends at holding 2 (dew point).
         let err = svc(tnh())
-            .handle(Request::ReadHoldingRegisters(0, 3))
+            .handle(Request::ReadHoldingRegisters(0, 4))
             .expect_err("qty covers a hole");
         assert_eq!(err, ExceptionCode::IllegalDataAddress);
     }
@@ -433,9 +434,9 @@ registers:
         let err = svc
             .handle(Request::WriteMultipleCoils(
                 0,
-                Cow::Owned(vec![true, true, true]),
+                Cow::Owned(vec![true, true, true, true]),
             ))
-            .expect_err("third coil missing");
+            .expect_err("fourth coil missing");
         assert_eq!(err, ExceptionCode::IllegalDataAddress);
         assert_eq!(
             svc.handle(Request::ReadCoils(0, 2)).unwrap(),
@@ -446,7 +447,7 @@ registers:
     #[test]
     fn fc1_past_the_map_is_illegal_address() {
         let err = svc(tnh())
-            .handle(Request::ReadCoils(0, 3))
+            .handle(Request::ReadCoils(0, 4))
             .expect_err("qty covers a missing coil");
         assert_eq!(err, ExceptionCode::IllegalDataAddress);
     }

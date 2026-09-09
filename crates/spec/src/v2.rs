@@ -195,6 +195,12 @@ fn materialize_registers(spec: &DeviceSpec) -> Result<RegisterMapSpec, SpecError
             }
         }
     }
+    // The export is keyed by point id, so it iterates alphabetically. Report
+    // the bank the way an author reads a register map: by address.
+    map.holding.sort_by_key(|r| r.address);
+    map.input.sort_by_key(|r| r.address);
+    map.coils.sort_by_key(|c| c.address);
+    map.discrete.sort_by_key(|c| c.address);
     Ok(map)
 }
 

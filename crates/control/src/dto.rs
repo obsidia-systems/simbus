@@ -49,8 +49,21 @@ pub struct ConfigResponse {
     pub unit_id: u8,
     pub endianness: String,
     pub spec_version: u32,
+    pub bindings: Vec<BindingInfo>,
     pub scenarios: Vec<ScenarioInfo>,
     pub registers: RegisterMapResponse,
+}
+
+/// One resolved binding as declared in the document (no CLI overrides).
+#[derive(Debug, Serialize)]
+pub struct BindingInfo {
+    pub protocol: &'static str,
+    pub port: Option<u16>,
+    pub unit_id: Option<u8>,
+    pub endianness: Option<&'static str>,
+    pub device_instance: Option<u32>,
+    pub points: Option<usize>,
+    pub implemented: bool,
 }
 
 #[derive(Debug, Serialize)]

@@ -83,7 +83,7 @@ GET (including SSE) is not keyed. Missing/wrong key on a write MUST 401.
 | Method | Path | Notes |
 | --- | --- | --- |
 | `GET` | `/status` | Live: name, type, Modbus TCP port, `modbus_tls_port` / `opcua_port` / `bacnet_port` (`null` if that binding is absent), tick, `time_scale`, `running`/`stopped`, field plane `listening`/`stopped` |
-| `GET` | `/config` | Document snapshot: map, `spec_version`, endianness, YAML `modbus.default_port`, bundled scenarios |
+| `GET` | `/config` | Document snapshot: map, `spec_version`, endianness, YAML `modbus.default_port`, declared `bindings`, bundled scenarios |
 | `GET` | `/healthz` | Liveness (always 200 if the task is up) |
 | `GET` | `/readyz` | 200 when **every** requested field listener is up **and** the simulation is running; else 503 (paused → 503). TLS-only, OPC UA-only, or BACnet-only: TCP is not required. Dual-bind: every listed plane |
 | `GET` | `/metrics` | Prometheus text |
@@ -99,6 +99,25 @@ document has no `opcua` binding.
 document has no `bacnet-ip` binding.
 `/config.modbus_port` is the YAML `modbus.default_port`. TCP listen and YAML
 default differ when CLI overrides `--port`.
+
+`/config.bindings` is the **document** view of the field plane: one row per
+resolved binding, in declaration order (language 1 with an empty `bindings`
+list shows the one inferred `modbus-tcp` row). It MUST NOT apply CLI or env
+port overrides — `/status` is the live view. Each row:
+
+| Field | Type | Meaning |
+| --- | --- | --- |
+| `protocol` | string | `modbus-tcp` · `modbus-tls` · `opcua` · `bacnet-ip` · `modbus-rtu` · `snmp-v2c` · `mqtt-sparkplug` |
+| `port` | uint16 or null | YAML / default port. `null` for a protocol with no IP port (`modbus-rtu`, `mqtt-sparkplug`) |
+| `unit_id` | uint8 or null | `modbus-tcp` only |
+| `endianness` | string or null | `modbus-tcp` only |
+| `device_instance` | uint32 or null | `bacnet-ip` only |
+| `points` | integer or null | Rows in that binding's `export`. `null` for a protocol with no export map |
+| `implemented` | bool | Whether this runtime serves the protocol ([spec.md](spec.md) §4.1) |
+
+A declared-but-unimplemented protocol is still listed, with
+`implemented: false`. The process refuses to boot such a document
+([runtime.md](runtime.md) §2), so on a running process every row is `true`.
 
 ### Registers and points
 
@@ -187,14 +206,14 @@ the active id MUST stop playback first.
 
 `POST /scenarios` body is JSON, not YAML. `id` MUST be kebab-case and MUST
 not match a bundled id. Steps are validated against the **loaded map**
-(unknown register/coil → 422). The file on disk does not change.
+(unknown point, register, or coil → 422). The file on disk does not change.
 
 ```bash
 curl http://localhost:8000/scenarios
 curl -X POST http://localhost:8000/scenarios/heat-wave/run
 curl -X POST http://localhost:8000/scenarios \
   -H 'content-type: application/json' \
-  -d '{"id":"lab-spike","name":"Lab spike","steps":[{"action":"set_register","at":0,"register_name":"temperature","value":30.0}]}'
+  -d '{"id":"lab-spike","name":"Lab spike","steps":[{"action":"set_point","at":0,"point":"temperature","value":30.0}]}'
 ```
 
 `heat-wave` exists on generic T&H. `power-outage` exists on generic UPS.

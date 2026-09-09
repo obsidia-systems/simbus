@@ -145,7 +145,8 @@ MUST fail the UA write (do not coerce a Boolean onto a float node).
    `crates/opcua`.
 2. If only the **vendor map** changes, change [spec.md](spec.md). Do not
    re-specify NodeIds there beyond §4.
-3. Tests: connect Anonymous/None, read `holding/temperature` on the language-1
-   T&H template (~22.5), write a holding node and see `state.base` move.
-   Language 2 uses `ns=N;s={id}` under Input/Value/Output.
+3. Tests: connect Anonymous/None, read `temperature` on the T&H template
+   (~22.5), write a holding node and see `state.base` move. That template is
+   language 2, so the NodeId is `ns=N;s={id}` under Input/Value/Output; a
+   language-1 document would answer at `holding/temperature`.
 4. Do not add SignAndEncrypt until this file says so.

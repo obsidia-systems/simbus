@@ -663,10 +663,13 @@ fn read_words_rejects_a_range_with_a_hole() {
 #[test]
 fn write_coils_rejects_unmapped() {
     let device = Device::new(tnh_spec(), Some(1), 1.0);
-    let err = device.write_coils(0, &[true, true, true]).unwrap_err();
+    // The T&H map ends at coil 2, so a four-coil write runs off the bank.
+    let err = device
+        .write_coils(0, &[true, true, true, true])
+        .unwrap_err();
     assert!(matches!(
         err,
-        engine::DeviceError::UnknownCoilAddress { address: 2 }
+        engine::DeviceError::UnknownCoilAddress { address: 3 }
     ));
     assert_eq!(device.snapshot().coils.get(&0), Some(&false));
 }
