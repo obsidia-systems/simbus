@@ -7,6 +7,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [0.3.0] — 2026-09-09
+
 ### Added
 
 - Rust rewrite of the 0.2.x Python runtime: workspace crates `spec`,
