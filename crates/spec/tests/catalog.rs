@@ -330,3 +330,122 @@ registers:
     assert!(!report.contains("specified, not implemented"));
     assert!(report.contains("opcua :4840"));
 }
+
+fn holding_sim(body: &str) -> String {
+    format!(
+        r"
+name: x
+version: '1.0'
+type: x
+modbus:
+  default_port: 502
+registers:
+  holding:
+    - address: 0
+      name: a
+      default: 1.0
+      simulation:
+{body}
+"
+    )
+}
+
+#[test]
+fn accepts_square_triangle_uniform_cycle() {
+    let yaml = holding_sim(
+        r"        behavior: square
+        period_seconds: 10
+        amplitude: 5.0",
+    );
+    let spec = load_device_from_str(&yaml).unwrap();
+    assert_eq!(
+        spec.registers.holding[0]
+            .simulation
+            .as_ref()
+            .unwrap()
+            .kind_name(),
+        "square"
+    );
+
+    let yaml = holding_sim(
+        r"        behavior: triangle
+        period_seconds: 8
+        min: 0.0
+        max: 10.0",
+    );
+    assert_eq!(
+        load_device_from_str(&yaml).unwrap().registers.holding[0]
+            .simulation
+            .as_ref()
+            .unwrap()
+            .kind_name(),
+        "triangle"
+    );
+
+    let yaml = holding_sim(
+        r"        behavior: uniform
+        min: 10.0
+        max: 90.0",
+    );
+    assert_eq!(
+        load_device_from_str(&yaml).unwrap().registers.holding[0]
+            .simulation
+            .as_ref()
+            .unwrap()
+            .kind_name(),
+        "uniform"
+    );
+
+    let yaml = holding_sim(
+        r"        behavior: cycle
+        dwell_seconds: 5
+        values: [0.0, 25.0, 50.0]",
+    );
+    let spec = load_device_from_str(&yaml).unwrap();
+    assert_eq!(
+        spec.registers.holding[0]
+            .simulation
+            .as_ref()
+            .unwrap()
+            .kind_name(),
+        "cycle"
+    );
+    let report = device_report("cycle.yaml", &spec);
+    assert!(report.contains("cycle"));
+}
+
+#[test]
+fn rejects_invalid_square_triangle_uniform_cycle() {
+    let err = load_device_from_str(&holding_sim(
+        r"        behavior: square
+        period_seconds: 0
+        amplitude: 5.0",
+    ))
+    .unwrap_err();
+    assert!(err.to_string().contains("period_seconds"), "{err}");
+
+    let err = load_device_from_str(&holding_sim(
+        r"        behavior: triangle
+        period_seconds: 8
+        min: 10.0
+        max: 10.0",
+    ))
+    .unwrap_err();
+    assert!(err.to_string().contains("triangle min"), "{err}");
+
+    let err = load_device_from_str(&holding_sim(
+        r"        behavior: uniform
+        min: 90.0
+        max: 10.0",
+    ))
+    .unwrap_err();
+    assert!(err.to_string().contains("uniform min"), "{err}");
+
+    let err = load_device_from_str(&holding_sim(
+        r"        behavior: cycle
+        dwell_seconds: 1
+        values: []",
+    ))
+    .unwrap_err();
+    assert!(err.to_string().contains("at least one value"), "{err}");
+}

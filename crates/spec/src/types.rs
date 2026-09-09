@@ -279,10 +279,40 @@ pub enum BehaviorSpec {
         /// Ramp end.
         max: f64,
     },
+    /// Analog high/low around `state.base` (50% duty).
+    Square {
+        /// Full high+low cycle in seconds.
+        period_seconds: f64,
+        /// Peak deviation from center.
+        amplitude: f64,
+    },
+    /// Symmetric ramp `min → max → min`.
+    Triangle {
+        /// Period in seconds.
+        period_seconds: f64,
+        /// Low end.
+        min: f64,
+        /// High end.
+        max: f64,
+    },
+    /// Uniform random in `[min, max]` each tick.
+    Uniform {
+        /// Inclusive lower bound.
+        min: f64,
+        /// Inclusive upper bound.
+        max: f64,
+    },
     /// Discrete jumps at elapsed times.
     Step {
         /// Ordered or unordered steps; engine sorts by `at`.
         steps: Vec<StepEntry>,
+    },
+    /// Walk `values` in order, one entry every `dwell_seconds`, then repeat.
+    Cycle {
+        /// Simulation seconds spent on each value.
+        dwell_seconds: f64,
+        /// Non-empty list of engineering values.
+        values: Vec<f64>,
     },
 }
 
@@ -353,6 +383,47 @@ impl BehaviorSpec {
                 }
                 Ok(())
             }
+            Self::Square {
+                period_seconds,
+                amplitude,
+            } => {
+                if *period_seconds <= 0.0 {
+                    return Err(SpecError::Validation(format!(
+                        "{ctx}: period_seconds must be > 0"
+                    )));
+                }
+                if *amplitude <= 0.0 {
+                    return Err(SpecError::Validation(format!(
+                        "{ctx}: amplitude must be > 0"
+                    )));
+                }
+                Ok(())
+            }
+            Self::Triangle {
+                period_seconds,
+                min,
+                max,
+            } => {
+                if *period_seconds <= 0.0 {
+                    return Err(SpecError::Validation(format!(
+                        "{ctx}: period_seconds must be > 0"
+                    )));
+                }
+                if min >= max {
+                    return Err(SpecError::Validation(format!(
+                        "{ctx}: triangle min must be less than max"
+                    )));
+                }
+                Ok(())
+            }
+            Self::Uniform { min, max } => {
+                if min >= max {
+                    return Err(SpecError::Validation(format!(
+                        "{ctx}: uniform min must be less than max"
+                    )));
+                }
+                Ok(())
+            }
             Self::Step { steps } => {
                 if steps.is_empty() {
                     return Err(SpecError::Validation(format!(
@@ -362,6 +433,22 @@ impl BehaviorSpec {
                 if steps.iter().any(|s| s.at < 0.0) {
                     return Err(SpecError::Validation(format!(
                         "{ctx}: step.at must be >= 0"
+                    )));
+                }
+                Ok(())
+            }
+            Self::Cycle {
+                dwell_seconds,
+                values,
+            } => {
+                if *dwell_seconds <= 0.0 {
+                    return Err(SpecError::Validation(format!(
+                        "{ctx}: dwell_seconds must be > 0"
+                    )));
+                }
+                if values.is_empty() {
+                    return Err(SpecError::Validation(format!(
+                        "{ctx}: cycle behavior needs at least one value"
                     )));
                 }
                 Ok(())
@@ -378,7 +465,11 @@ impl BehaviorSpec {
             Self::Sinusoidal { .. } => "sinusoidal",
             Self::Drift { .. } => "drift",
             Self::Sawtooth { .. } => "sawtooth",
+            Self::Square { .. } => "square",
+            Self::Triangle { .. } => "triangle",
+            Self::Uniform { .. } => "uniform",
             Self::Step { .. } => "step",
+            Self::Cycle { .. } => "cycle",
         }
     }
 }

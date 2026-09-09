@@ -467,9 +467,15 @@ fn init_reg_state(reg: &RegisterSpec, rng: &mut StdRng) -> RegState {
         Some(BehaviorSpec::Sinusoidal { period_hours, .. }) => {
             rng.random_range(0.0..(period_hours * 3600.0).max(1.0))
         }
-        Some(BehaviorSpec::Sawtooth { period_seconds, .. }) => {
+        Some(BehaviorSpec::Sawtooth { period_seconds, .. })
+        | Some(BehaviorSpec::Square { period_seconds, .. })
+        | Some(BehaviorSpec::Triangle { period_seconds, .. }) => {
             rng.random_range(0.0..period_seconds.max(1.0))
         }
+        Some(BehaviorSpec::Cycle {
+            dwell_seconds,
+            values,
+        }) => rng.random_range(0.0..(dwell_seconds * values.len() as f64).max(1.0)),
         Some(BehaviorSpec::Step { .. }) => rng.random_range(0.0..60.0),
         _ => 0.0,
     };
@@ -656,9 +662,28 @@ fn compute(
             min,
             max,
         } => behaviors::sawtooth(*period_seconds, *min, *max, state.elapsed_s + state.phase_s),
+        BehaviorSpec::Square {
+            period_seconds,
+            amplitude,
+        } => behaviors::square(
+            state.base,
+            *amplitude,
+            *period_seconds,
+            state.elapsed_s + state.phase_s,
+        ),
+        BehaviorSpec::Triangle {
+            period_seconds,
+            min,
+            max,
+        } => behaviors::triangle(*period_seconds, *min, *max, state.elapsed_s + state.phase_s),
+        BehaviorSpec::Uniform { min, max } => behaviors::uniform(*min, *max, rng),
         BehaviorSpec::Step { steps } => {
             behaviors::step_value(default, steps, state.elapsed_s + state.phase_s)
         }
+        BehaviorSpec::Cycle {
+            dwell_seconds,
+            values,
+        } => behaviors::cycle(values, *dwell_seconds, state.elapsed_s + state.phase_s),
     }
 }
 

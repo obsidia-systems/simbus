@@ -365,6 +365,132 @@ registers:
 }
 
 #[test]
+fn square_follows_patched_base() {
+    let spec = spec::load_device_from_str(
+        r"
+name: square
+version: '1.0'
+type: x
+modbus:
+  default_port: 502
+registers:
+  holding:
+    - address: 0
+      name: level
+      default: 20.0
+      scale: 10
+      data_type: uint16
+      simulation:
+        behavior: square
+        period_seconds: 10
+        amplitude: 5.0
+",
+    )
+    .unwrap();
+    let device = Device::new(spec, Some(1), 1.0);
+    device
+        .override_register(RegisterSpace::Holding, 0, None, Some(40.0), "test")
+        .unwrap();
+    let raw = *device.tick(1.0).holding.get(&0).unwrap();
+    assert!(
+        raw == 350 || raw == 450,
+        "expected 35.0 or 45.0 encoded, got {raw}"
+    );
+}
+
+#[test]
+fn cycle_overwrites_patch_on_next_tick() {
+    let spec = spec::load_device_from_str(
+        r"
+name: cycle
+version: '1.0'
+type: x
+modbus:
+  default_port: 502
+registers:
+  holding:
+    - address: 0
+      name: mode
+      default: 0.0
+      scale: 1
+      data_type: uint16
+      simulation:
+        behavior: cycle
+        dwell_seconds: 1
+        values: [10]
+",
+    )
+    .unwrap();
+    let device = Device::new(spec, Some(1), 1.0);
+    device
+        .override_register(RegisterSpace::Holding, 0, None, Some(5.0), "test")
+        .unwrap();
+    let snap = device.tick(1.0);
+    assert_eq!(snap.holding.get(&0), Some(&10));
+}
+
+#[test]
+fn uniform_stays_in_yaml_range() {
+    let spec = spec::load_device_from_str(
+        r"
+name: uniform
+version: '1.0'
+type: x
+modbus:
+  default_port: 502
+registers:
+  holding:
+    - address: 0
+      name: noise
+      default: 15.0
+      scale: 10
+      data_type: uint16
+      simulation:
+        behavior: uniform
+        min: 10.0
+        max: 20.0
+",
+    )
+    .unwrap();
+    let device = Device::new(spec, Some(3), 1.0);
+    for _ in 0..40 {
+        let raw = *device.tick(1.0).holding.get(&0).unwrap();
+        assert!((100..=200).contains(&raw), "{raw}");
+    }
+}
+
+#[test]
+fn triangle_stays_between_min_and_max() {
+    let spec = spec::load_device_from_str(
+        r"
+name: triangle
+version: '1.0'
+type: x
+modbus:
+  default_port: 502
+registers:
+  holding:
+    - address: 0
+      name: ramp
+      default: 0.0
+      scale: 1
+      data_type: uint16
+      simulation:
+        behavior: triangle
+        period_seconds: 8
+        min: 0.0
+        max: 100.0
+",
+    )
+    .unwrap();
+    let device = Device::new(spec, Some(2), 1.0);
+    for _ in 0..16 {
+        let raw = *device.tick(1.0).holding.get(&0).unwrap();
+        assert!(raw <= 100, "{raw}");
+    }
+}
+
+#[test]
 fn reset_replays_the_boot_trace() {
     let a = Device::new(tnh_spec(), Some(11), 1.0);
     let mut first = Vec::new();

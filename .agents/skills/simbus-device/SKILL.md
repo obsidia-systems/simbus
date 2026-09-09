@@ -54,8 +54,13 @@ Set `spec_version: 1`. Holding/input names unique across both spaces. Coil and
 discrete names unique across both bit spaces. `scale` ≥ 1. No overlapping words
 (`float32`/`uint32` occupy `address` and `address+1`).
 
-Behaviors: `constant`, `gaussian_noise`, `sinusoidal`, `drift`, `sawtooth`,
-`step`. Drift `rate` is engineering units **per simulation second**. Triggers
+Behaviors: `constant`, `gaussian_noise`, `sinusoidal`, `square`, `drift`,
+`sawtooth`, `triangle`, `uniform`, `step`, `cycle`. `square` is analog
+high/low around `state.base`. `triangle` ramps min↔max (unlike `sawtooth`,
+which only rises). `uniform` is Uniform(min, max) each tick, not Normal
+around `state.base`. `cycle` walks `values` every `dwell_seconds` (unlike
+`step`, which is an absolute `at` schedule). Drift `rate` is engineering
+units **per simulation second**. Triggers
 (`gt`/`lt`/`eq`/`gte`/`lte`) must name a register that exists. Alarms must name
 a coil or discrete that exists.
 

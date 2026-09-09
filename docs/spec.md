@@ -321,9 +321,13 @@ faults) are defined in [simulation.md](simulation.md). This section is syntax.
 | `constant` | — | — |
 | `gaussian_noise` | `std_dev` > 0 | `drift` |
 | `sinusoidal` | `period_hours` > 0, `amplitude` > 0 | `drift` |
+| `square` | `period_seconds` > 0, `amplitude` > 0 | — |
 | `drift` | `rate`, `bounds: [min, max]` with min < max | — |
 | `sawtooth` | `period_seconds` > 0, `min` < `max` | — |
+| `triangle` | `period_seconds` > 0, `min` < `max` | — |
+| `uniform` | `min` < `max` | — |
 | `step` | `steps: [{at ≥ 0, value}]` non-empty | — |
+| `cycle` | `dwell_seconds` > 0, `values` non-empty | — |
 
 **Drift modifier** (on `gaussian_noise` and `sinusoidal` only):
 
@@ -345,6 +349,14 @@ simulation:
     rate: 0.01
     bounds: [18.0, 35.0]
 ```
+
+`square` is analog all/nothing around `state.base` (deadband / alarm tests).
+`triangle` is a symmetric ramp `min ↔ max` (`sawtooth` only rises, then jumps
+to `min`). `uniform` draws Uniform(`min`, `max`) each tick — not
+`gaussian_noise` (Normal around `state.base`). `cycle` walks `values` in
+order, one entry every `dwell_seconds` of simulation time, then repeats.
+It is not `step` (`step` is an absolute `elapsed_s` schedule that holds the
+last entry).
 
 ---
 

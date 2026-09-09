@@ -73,29 +73,36 @@ takes 12 simulation hours. With `--time-scale 60` those 12 simulation hours
 elapse in 12 wall minutes. The engine MUST NOT store a second clock;
 only the `dt` the caller passes matters.
 
-Periodic behaviors (`sinusoidal`, `sawtooth`, `step`) and fault TTLs use
-elapsed simulation time. Drift uses **engineering units per simulation
-second**, applied as `rate × dt`. Changing `--tick` MUST NOT change the
-physical trajectory, only how often it is sampled. Changing `--time-scale`
-MUST (same trajectory, faster or slower wall time).
+Periodic behaviors (`sinusoidal`, `square`, `sawtooth`, `triangle`,
+`cycle`, `step`) and fault TTLs use elapsed simulation time. Drift uses
+**engineering units per simulation second**, applied as `rate × dt`.
+Changing `--tick` MUST NOT change the physical trajectory, only how often
+it is sampled. Changing `--time-scale` MUST (same trajectory, faster or
+slower wall time).
 
 ---
 
 ## 3. Operating point — `state.base`
 
 Every numeric register has `state.base`, initialized from YAML `default`
-(then jittered — §6). All behaviors use `state.base` as center or drift
-state.
+(then jittered — §6).
+
+Behaviors that **use** `state.base` as center or drift state: `constant`,
+`gaussian_noise`, `sinusoidal`, `square`, `drift`. A PATCH shifts the
+operating point and the next tick follows it.
+
+Behaviors that **own** the live value (YAML range, list, or schedule):
+`sawtooth`, `triangle`, `uniform`, `cycle`, `step`. `PATCH` / FC6 still
+call `update_base`; the value is visible until the next tick, then
+overwritten from the waveform, draw, or schedule (§5).
 
 `PATCH /registers/…` and Modbus FC6/FC16 MUST call `update_base` for **each**
 cell whose words changed: decode `raw / scale` (or the provided `real_value`)
-into `state.base`. The next tick runs from that point. It MUST NOT snap back
-to YAML `default`. FC16 of two adjacent `uint16` cells MUST update both
-bases. FC6 of one word of a `float32`/`uint32` pair splices that word into
-the cell, then updates that one base ([modbus.md](modbus.md) §3.2).
-
-`step` is the exception: the schedule owns the register. A PATCH is visible
-until the next tick, then overwritten (§5).
+into `state.base`. For behaviors that use `state.base`, the next tick runs
+from that point. It MUST NOT snap back to YAML `default`. FC16 of two
+adjacent `uint16` cells MUST update both bases. FC6 of one word of a
+`float32`/`uint32` pair splices that word into the cell, then updates that
+one base ([modbus.md](modbus.md) §3.2).
 
 ---
 
@@ -127,6 +134,19 @@ Then sample Normal(`state.base`, `std_dev`).
 value = state.base + amplitude × sin(2π × t / (period_hours × 3600))
 ```
 
+### square
+
+50% duty, analog high then low around `state.base`:
+
+```text
+u = (t mod period_seconds) / period_seconds
+value = state.base + amplitude     if u < 0.5
+value = state.base − amplitude     otherwise
+```
+
+`period_seconds` is the full high+low cycle (lab-scale, unlike
+`sinusoidal`'s `period_hours`).
+
 ### drift
 
 ```text
@@ -144,13 +164,47 @@ not bounce at a bound.
 value = min + (max − min) × (t mod period_seconds) / period_seconds
 ```
 
-Rising ramp only. Resets to `min` at each period.
+Rising ramp only. Resets to `min` at each period. Does not use
+`state.base`.
+
+### triangle
+
+Symmetric ramp `min → max → min` in one `period_seconds`:
+
+```text
+u = (t mod period_seconds) / period_seconds
+value = min + (max − min) × (2u)           if u < 0.5
+value = max − (max − min) × (2u − 1)       otherwise
+```
+
+Does not use `state.base`. At `u = 0` the value is `min`; at `u = 0.5` it
+is `max`.
+
+### uniform
+
+Each tick, sample Uniform(`min`, `max`) inclusive. Independent of
+`state.base`. Distinct from `gaussian_noise` (Normal around the operating
+point).
 
 ### step
 
 Hold YAML `default` until the first `at`, then the last step with
 `at <= t`. Equal `at` values: last in the list wins. The last step is held
 indefinitely. PATCH does not change the schedule.
+
+### cycle
+
+Walk YAML `values` in order, one index every `dwell_seconds` of simulation
+time, then repeat from the first:
+
+```text
+i = floor(t / dwell_seconds) mod len(values)
+value = values[i]
+```
+
+Does not use `state.base`. Empty `values` is invalid (spec §6). Unlike
+`step`, there is no absolute `at` and the walk does not stop at the last
+entry.
 
 ### 5.1 Drift modifier
 
@@ -174,8 +228,10 @@ At `Device::new`:
 
 - Mix `--seed` with `name`, `type`, and `identity` (`vendor`, `product`,
   `revision`) via FNV-1a. Unseeded devices use OS entropy.
-- `sinusoidal` / `sawtooth` / `step` get a random `phase_s` inside one
-  period (step: `0..60` s).
+- `sinusoidal` / `square` / `sawtooth` / `triangle` / `cycle` / `step` get
+  a random `phase_s` inside one period (`square`/`sawtooth`/`triangle`:
+  `0..period_seconds`; `cycle`: one full walk `0..(dwell_seconds ×
+  len(values))`; `step`: `0..60` s).
 - `gaussian_noise` jitters `state.base` by one sample of `std_dev`.
 - `drift` jitters `state.base` by ~2% of the bound span, then clamps.
 

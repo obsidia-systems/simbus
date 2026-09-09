@@ -27,9 +27,8 @@ Do not restore it.
 
 ## Value shapes (engine)
 
-Tick behaviors today: `constant`, `gaussian_noise`, `sinusoidal`, `drift`,
-`sawtooth`, `step` ([simulation.md](simulation.md)). Ignition's Programmable
-Device Simulator also ships cosine, square, triangle, uniform random
-min–max, a PID “realistic” walk, `list(...)`, and `qv` quality. Those are
-**not** YAML kinds yet. Do not add them until [simulation.md](simulation.md)
-and [spec.md](spec.md) §6 name them.
+`square`, `triangle`, `uniform`, and `cycle` are in
+[simulation.md](simulation.md) / [spec.md](spec.md) §6. Still not YAML
+kinds: cosine (use `sinusoidal` plus `phase_s`), a PID “realistic” walk
+(`drift` + `gaussian_noise` is the lab substitute), and OPC UA `qv`
+quality (status codes, not a tick behavior — [opcua.md](opcua.md)).

@@ -39,6 +39,9 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - `POST /scenarios` installs a session copy (JSON, same schema as the YAML).
   `DELETE /scenarios/{id}` drops it. Bundled ids return 409.
   `simbus ctl install` / `uninstall`.
+- Tick behaviors `square`, `triangle`, `uniform`, and `cycle` (YAML kinds;
+  formulas in `docs/simulation.md`). Same live bank as Modbus and OPC UA.
+  `cosine` / PID walk / UA `qv` stay deferred (`docs/debt.md`).
 - OPC UA field plane: `protocol: opcua` serves the same YAML map on IANA
   **4840** (`crates/opcua`, async-opcua, None + Anonymous). Dual-bind with
   Modbus TCP/TLS. Official builtin maps stay Modbus-only. `/status.opcua_port`

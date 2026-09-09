@@ -39,7 +39,7 @@ static, hard to script, or impossible to containerize. **simbus** was built to f
 | Without simbus | With simbus |
 | --- | --- |
 | Buy a UPS, PDU, and sensors just to test a tag config | `docker compose up tnh-sensor ups pdu` |
-| Static registers that never change | Gaussian noise, drift, sinusoidal cycles, sawtooth |
+| Static registers that never change | Gaussian noise, drift, sine/square/triangle, sawtooth, uniform, cycle |
 | Can't test alarm pipelines without breaking real hardware | Inject spikes, freezes, dropouts via REST — on demand |
 | Rebuilding state after every test run | `POST /simulation/reset` rewinds everything instantly |
 | Hardcoded tag addresses in every test | `GET /config` returns the full register map dynamically |
@@ -301,9 +301,11 @@ when the YAML lists `protocol: opcua`. Scenarios are bundled in the device YAML.
 
 ## Simulation Behaviors
 
-Every register declares an independent behavior. All behaviors use `state.base` as their operating
-point, which means a `PATCH /registers/{address}` call shifts the center and the simulation
-**adapts immediately** without a restart.
+Every register declares an independent behavior. `constant`, `gaussian_noise`,
+`sinusoidal`, `square`, and `drift` use `state.base` as the operating point: a
+`PATCH /registers/{address}` shifts the center and the next tick follows it.
+`sawtooth`, `triangle`, `uniform`, `cycle`, and `step` own the live value
+(range, list, or schedule); a PATCH is visible until the next tick.
 
 ```mermaid
 flowchart LR
@@ -311,20 +313,28 @@ flowchart LR
 
     BASE --> GN["gaussian_noise\nbase ± std_dev"]
     BASE --> SIN["sinusoidal\nbase + amplitude·sin(t)"]
+    BASE --> SQR["square\nbase ± amplitude"]
     BASE --> DR["drift\nbase ± rate × dt"]
-    BASE --> SAW["sawtooth\nramps min→max"]
-    BASE --> STEP["step\njumps at elapsed_s"]
     BASE --> CONST["constant\nreturns base"]
+    SAW["sawtooth\nramps min→max"]
+    TRI["triangle\nmin↔max"]
+    UNI["uniform\nmin..max each tick"]
+    CYC["cycle\nvalues every dwell"]
+    STEP["step\njumps at elapsed_s"]
 ```
 
 | Behavior | Description | Key parameters |
 | --- | --- | --- |
 | `constant` | Fixed value | — |
-| `gaussian_noise` | Random noise around center | `std_dev` |
+| `gaussian_noise` | Normal noise around center | `std_dev` |
 | `sinusoidal` | Sine wave oscillation | `period_hours`, `amplitude` |
+| `square` | Analog high/low around center | `period_seconds`, `amplitude` |
 | `drift` | Slow linear movement with bounds | `rate`, `bounds` |
 | `sawtooth` | Ramps from min to max, then resets | `period_seconds`, `min`, `max` |
+| `triangle` | Symmetric ramp min → max → min | `period_seconds`, `min`, `max` |
+| `uniform` | Uniform random in `[min, max]` each tick | `min`, `max` |
 | `step` | Jumps to defined values at specific elapsed times | `steps: [{at, value}]` |
+| `cycle` | Walk a list, one value every `dwell_seconds`, repeat | `dwell_seconds`, `values` |
 
 `gaussian_noise` and `sinusoidal` also support a `drift` sub-modifier that slowly shifts their
 center over time.
