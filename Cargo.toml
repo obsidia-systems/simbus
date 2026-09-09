@@ -45,7 +45,7 @@ thiserror = { version = "2.0", default-features = false }
 tokio = { version = "1.47", default-features = false, features = ["io-util", "macros", "net", "rt-multi-thread", "signal", "sync", "time"] }
 tokio-modbus = { version = "0.17", default-features = false }
 tokio-stream = { version = "0.1", default-features = false, features = ["sync", "time"] }
-tower-http = { version = "0.6", default-features = false, features = ["cors", "timeout", "trace"] }
+tower-http = { version = "0.7", default-features = false, features = ["cors", "timeout", "trace"] }
 tracing = { version = "0.1", default-features = false, features = ["std"] }
 tracing-subscriber = { version = "0.3", default-features = false, features = ["env-filter", "fmt", "std"] }
 utoipa = { version = "5.4", default-features = false, features = ["macros"] }
