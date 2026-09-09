@@ -10,6 +10,7 @@ pub struct StatusResponse {
     pub device_type: String,
     pub modbus_port: u16,
     pub modbus_tls_port: Option<u16>,
+    pub opcua_port: Option<u16>,
     pub tick_interval: f64,
     pub time_scale: f64,
     pub simulation: &'static str,

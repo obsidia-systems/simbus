@@ -72,6 +72,9 @@ struct RunArgs {
     /// Override device name
     #[arg(short, long, env = "SIMBUS_DEVICE_NAME")]
     name: Option<String>,
+    /// OPC UA port (overrides YAML; ignored unless the document has opcua)
+    #[arg(long, env = "SIMBUS_OPCUA_PORT")]
+    opcua_port: Option<u16>,
     /// REST API port
     #[arg(long, env = "SIMBUS_API_PORT", default_value_t = 8000)]
     api_port: u16,
@@ -146,6 +149,7 @@ struct TlsBind {
 struct FieldListeners {
     tcp: Option<(u16, u8)>,
     tls: Option<TlsBind>,
+    opcua: Option<u16>,
 }
 
 fn require_pem(path: &Path, label: &str) -> Result<()> {
@@ -159,6 +163,7 @@ fn field_listeners(spec: &spec::DeviceSpec, args: &RunArgs) -> Result<FieldListe
     let mut unit_id = spec.modbus.unit_id;
     let mut tcp_port: Option<u16> = None;
     let mut tls: Option<TlsBind> = None;
+    let mut opcua: Option<u16> = None;
     for binding in spec.resolved_bindings() {
         match binding {
             BindingSpec::ModbusTcp {
@@ -192,6 +197,9 @@ fn field_listeners(spec: &spec::DeviceSpec, args: &RunArgs) -> Result<FieldListe
                     cafile,
                 });
             }
+            BindingSpec::Opcua { port } => {
+                opcua = Some(args.opcua_port.unwrap_or(port));
+            }
             _ => {}
         }
     }
@@ -210,6 +218,7 @@ fn field_listeners(spec: &spec::DeviceSpec, args: &RunArgs) -> Result<FieldListe
     Ok(FieldListeners {
         tcp: tcp_port.map(|port| (port, unit_id)),
         tls,
+        opcua,
     })
 }
 
@@ -275,14 +284,17 @@ async fn main() -> Result<()> {
     let listeners = field_listeners(&spec, &args)?;
     let tcp = listeners.tcp;
     let tls = listeners.tls;
+    let opcua = listeners.opcua;
     let modbus_port = tcp.map(|(p, _)| p).unwrap_or(spec.modbus.default_port);
     let modbus_tls_port = tls.as_ref().map(|t| t.port);
+    let opcua_port = opcua;
     let device = Device::new(spec, args.seed, args.tick);
     device.set_running(true);
 
     let scenarios = Arc::new(ScenarioRunner::new(device.clone()));
     let tcp_ready = Arc::new(AtomicBool::new(tcp.is_none()));
     let tls_ready = Arc::new(AtomicBool::new(tls.is_none()));
+    let opcua_ready = Arc::new(AtomicBool::new(opcua.is_none()));
     let cors: Vec<String> = args
         .cors_origins
         .split(',')
@@ -297,8 +309,10 @@ async fn main() -> Result<()> {
         api_key: args.api_key,
         modbus_port,
         modbus_tls_port,
+        opcua_port,
         modbus_ready: tcp_ready.clone(),
         modbus_tls_ready: tls_ready.clone(),
+        opcua_ready: opcua_ready.clone(),
         scenario_task: Arc::new(Mutex::new(None)),
         snapshots: snapshots.clone(),
         time_scale: args.time_scale,
@@ -310,6 +324,7 @@ async fn main() -> Result<()> {
         api_port = args.api_port,
         modbus_port,
         modbus_tls_port,
+        opcua_port,
         tick_interval = args.tick,
         time_scale = args.time_scale,
         "simbus started"
@@ -377,6 +392,21 @@ async fn main() -> Result<()> {
         }));
     }
 
+    let mut ua_task: Option<JoinHandle<()>> = None;
+    if let Some(port) = opcua {
+        let mut shutdown = cancel_tx.subscribe();
+        let ua_device = device.clone();
+        let ready = opcua_ready;
+        ua_task = Some(tokio::spawn(async move {
+            let stop = async move {
+                let _ = shutdown.wait_for(|stop| *stop).await;
+            };
+            if let Err(err) = opcua::serve(ua_device, port, ready, stop).await {
+                error!(error = %err, "opcua server failed");
+            }
+        }));
+    }
+
     let mut api_shutdown = cancel_tx.subscribe();
     let api_host = args.host.clone();
     let api_port = args.api_port;
@@ -403,6 +433,10 @@ async fn main() -> Result<()> {
             error!("modbus tls task ended");
             false
         }
+        _ = wait_optional_task(&mut ua_task) => {
+            error!("opcua task ended");
+            false
+        }
         res = &mut api_task => {
             error!(?res, "api task ended");
             false
@@ -416,18 +450,21 @@ async fn main() -> Result<()> {
             tick_task.abort();
             abort_optional(&tcp_task);
             abort_optional(&tls_task);
+            abort_optional(&ua_task);
             api_task.abort();
         } else {
             tokio::select! {
                 _ = async {
                     join_optional(&mut tcp_task).await;
                     join_optional(&mut tls_task).await;
+                    join_optional(&mut ua_task).await;
                     let _ = tokio::join!(&mut tick_task, &mut api_task);
                 } => {}
                 () = tokio::time::sleep(Duration::from_secs_f64(args.shutdown_timeout)) => {
                     tick_task.abort();
                     abort_optional(&tcp_task);
                     abort_optional(&tls_task);
+                    abort_optional(&ua_task);
                     api_task.abort();
                 }
             }
@@ -437,6 +474,7 @@ async fn main() -> Result<()> {
         tick_task.abort();
         abort_optional(&tcp_task);
         abort_optional(&tls_task);
+        abort_optional(&ua_task);
         api_task.abort();
         bail!("a runtime task ended unexpectedly")
     }
@@ -708,6 +746,7 @@ registers:
         let listeners = field_listeners(&spec, &args).unwrap();
         assert_eq!(listeners.tcp, Some((502, 1)));
         assert!(listeners.tls.is_none());
+        assert!(listeners.opcua.is_none());
     }
 
     #[test]
@@ -742,5 +781,58 @@ registers:
         assert_eq!(tcp, Some((1502, 1)));
         assert_eq!(tls.unwrap().port, 8802);
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    fn opcua_yaml() -> &'static str {
+        r"
+name: ua-fix
+version: '1.0'
+type: fixture
+modbus:
+  default_port: 502
+  unit_id: 1
+bindings:
+  - protocol: modbus-tcp
+  - protocol: opcua
+    port: 4840
+registers:
+  holding:
+    - address: 0
+      name: temperature
+      default: 22.5
+      scale: 10
+      data_type: uint16
+"
+    }
+
+    #[test]
+    fn parses_opcua_port_flag() {
+        let cli = Cli::try_parse_from(["simbus", "--opcua-port", "14840"]).unwrap();
+        assert_eq!(cli.run.opcua_port, Some(14840));
+    }
+
+    #[test]
+    fn opcua_port_override_requires_binding() {
+        let spec = load_device_from_str(sample_yaml()).unwrap();
+        let args = Cli::try_parse_from(["simbus", "--opcua-port", "14840"])
+            .unwrap()
+            .run;
+        let listeners = field_listeners(&spec, &args).unwrap();
+        assert!(listeners.opcua.is_none());
+    }
+
+    #[test]
+    fn opcua_binding_uses_yaml_then_override() {
+        let spec = load_device_from_str(opcua_yaml()).unwrap();
+        let args = Cli::try_parse_from(["simbus"]).unwrap().run;
+        let listeners = field_listeners(&spec, &args).unwrap();
+        assert_eq!(listeners.tcp, Some((502, 1)));
+        assert_eq!(listeners.opcua, Some(4840));
+
+        let args = Cli::try_parse_from(["simbus", "--opcua-port", "14840"])
+            .unwrap()
+            .run;
+        let listeners = field_listeners(&spec, &args).unwrap();
+        assert_eq!(listeners.opcua, Some(14840));
     }
 }

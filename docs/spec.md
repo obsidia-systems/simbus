@@ -196,7 +196,7 @@ bindings:
 | `modbus-rtu` | yes | no |
 | `modbus-tls` | yes | **yes** |
 | `snmp-v2c` | yes | no |
-| `opcua` | yes | no |
+| `opcua` | yes | **yes** |
 | `mqtt-sparkplug` | yes | no |
 | `bacnet-ip` | yes | no |
 
@@ -230,7 +230,13 @@ CLI/env may override `certfile` / `keyfile` / `cafile` / `port` ([runtime.md](ru
 
 **`snmp-v2c`** — specified, not implemented: `port` (default 161), `community` (default `public`), `map` (optional OID file).
 
-**`opcua`** — specified, not implemented: `port` (default 4840).
+**`opcua`** — served (same YAML map, OPC UA variables, IANA **4840**):
+
+| Field | Type | Default |
+| --- | --- | --- |
+| `port` | uint16? | `4840` |
+
+CLI `--opcua-port` / `SIMBUS_OPCUA_PORT` may override the port ([runtime.md](runtime.md)). It does not rewrite the YAML and MUST NOT enable OPC UA unless the document already has this binding. Official maps under `devices/builtin/` MUST NOT declare this binding (Compose does not publish 4840). Dual-bind: list `modbus-tcp` (and/or `modbus-tls`) **and** `opcua`. Address space, data types, and the lab endpoint (None / Anonymous) are [opcua.md](opcua.md). This version does not take PEM files.
 
 **`mqtt-sparkplug`** — specified, not implemented: `broker`, `group_id`, `edge_node_id`.
 

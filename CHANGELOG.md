@@ -39,6 +39,11 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - `POST /scenarios` installs a session copy (JSON, same schema as the YAML).
   `DELETE /scenarios/{id}` drops it. Bundled ids return 409.
   `simbus ctl install` / `uninstall`.
+- OPC UA field plane: `protocol: opcua` serves the same YAML map on IANA
+  **4840** (`crates/opcua`, async-opcua, None + Anonymous). Dual-bind with
+  Modbus TCP/TLS. Official builtin maps stay Modbus-only. `/status.opcua_port`
+  is `null` when the document has no UA binding. `cargo deny` allows MPL-2.0
+  (async-opcua) and ignores two unfixed transitive advisories in that stack.
 - Modbus Security: `protocol: modbus-tls` serves the same V1.1b3 PDU over TLS
   (rustls) on IANA port **802**. Dual-bind with `modbus-tcp` is allowed.
   `certfile`/`keyfile` required at boot; `cafile` optional (mTLS). Official
@@ -74,7 +79,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   does not filter on MBAP unit id (`0xFF` / `0` are valid per V1.0b).
   `modbus-tls` wraps that PDU in TLS (IANA 802); `/status.modbus_tls_port`
   is `null` when the document has no TLS binding. `/readyz` waits for every
-  requested field listener.
+  requested field listener. OPC UA on IANA 4840 is served when the YAML lists
+  `protocol: opcua` (`/status.opcua_port`).
 - Documentation map (`docs/README.md`) and architecture explanation
   (`docs/architecture.md`) with GitHub-safe Mermaid (flowchart, sequence,
   state). README is the front door; contracts stay in `docs/`. Crate tests

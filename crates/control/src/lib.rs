@@ -41,10 +41,14 @@ pub struct AppState {
     pub modbus_port: u16,
     /// TLS listen port, or `None` when the document has no `modbus-tls` binding.
     pub modbus_tls_port: Option<u16>,
+    /// OPC UA listen port, or `None` when the document has no `opcua` binding.
+    pub opcua_port: Option<u16>,
     /// True when the Modbus TCP socket is accepting, or TCP was not requested.
     pub modbus_ready: Arc<AtomicBool>,
     /// True when the Modbus TLS socket is accepting, or TLS was not requested.
     pub modbus_tls_ready: Arc<AtomicBool>,
+    /// True when the OPC UA socket is accepting, or UA was not requested.
+    pub opcua_ready: Arc<AtomicBool>,
     /// In-flight scenario task, aborted on stop or when a new scenario starts.
     pub scenario_task: Arc<Mutex<Option<JoinHandle<()>>>>,
     /// Tick snapshots for SSE (`GET /registers/stream`).
@@ -66,6 +70,7 @@ impl AppState {
             && self
                 .modbus_tls_ready
                 .load(std::sync::atomic::Ordering::SeqCst)
+            && self.opcua_ready.load(std::sync::atomic::Ordering::SeqCst)
     }
 }
 

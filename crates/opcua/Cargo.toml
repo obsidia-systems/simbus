@@ -1,0 +1,23 @@
+[package]
+name = "opcua"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+description = "OPC UA server for simbus"
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+engine = { workspace = true }
+spec = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+ua = { package = "async-opcua", version = "0.19", default-features = false, features = ["server"] }
+
+[dev-dependencies]
+ua = { package = "async-opcua", version = "0.19", default-features = false, features = ["client", "server"] }

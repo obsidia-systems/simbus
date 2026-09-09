@@ -17,7 +17,7 @@ Classified with [Diátaxis](https://diataxis.fr/) so each page has one job.
 | [architecture.md](architecture.md) | Explanation | Process shape, crates, repo layout, sequences |
 | [spec.md](spec.md) | Reference | Device YAML language (boot contract) |
 | [runtime.md](runtime.md) | Reference | Binary, boot, CLI/env, signals, Docker |
-| [modbus.md](modbus.md) | Reference | Field plane: Modbus TCP PDU (V1.1b3 / V1.0b) and TLS wrap (IANA 802) |
+| [opcua.md](opcua.md) | Reference | Field plane: OPC UA (IANA 4840), YAML map as variables |
 | [control.md](control.md) | Reference | Session HTTP (not the field protocol) |
 | [simulation.md](simulation.md) | Reference | Tick, `state.base`, behaviors, faults, encode |
 | [scenarios.md](scenarios.md) | How-to | Run and author bundled scenarios |
@@ -53,6 +53,7 @@ flowchart LR
     author[Device author] --> spec[spec.md]
     operator[Operator] --> runtime[runtime.md]
     scada[SCADA] --> modbus[modbus.md]
+    scada --> opcua[opcua.md]
     gui[GUI / tests] --> control[control.md]
     spec --> check["simbus check"]
     runtime --> process[simbus process]

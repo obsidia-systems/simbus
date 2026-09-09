@@ -3,7 +3,10 @@ all-features = false
 no-default-features = false
 
 [advisories]
-ignore = []
+ignore = [
+    { id = "RUSTSEC-2023-0071", reason = "async-opcua 0.19 depends on rsa; no upgrade exists. This version serves OPC UA None+Anonymous only (no SignAndEncrypt)." },
+    { id = "RUSTSEC-2023-0089", reason = "async-opcua 0.19 postcard/heapless still uses unmaintained atomic-polyfill; no upgrade exists." },
+]
 
 [licenses]
 allow = [
@@ -16,6 +19,7 @@ allow = [
     "Unicode-3.0",
     "Zlib",
     "CDLA-Permissive-2.0",
+    "MPL-2.0",
 ]
 confidence-threshold = 0.8
 

@@ -130,6 +130,15 @@ impl Device {
         &self.spec
     }
 
+    /// Engineering value of a numeric cell (`raw / scale`).
+    #[must_use]
+    pub fn register_real(&self, space: RegisterSpace, address: u16) -> Option<f64> {
+        let spec_reg = find_register(&self.spec, space, address)?;
+        let inner = self.inner.read();
+        let cell = inner.bank.get_cell(space, address)?;
+        Some(raw_to_real(cell, spec_reg.scale))
+    }
+
     /// Current tick interval in seconds.
     #[must_use]
     pub fn tick_interval(&self) -> f64 {

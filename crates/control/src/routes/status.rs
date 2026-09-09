@@ -20,6 +20,7 @@ pub async fn get_status(State(state): State<AppState>) -> Json<StatusResponse> {
         device_type: spec.device_type.clone(),
         modbus_port: state.modbus_port,
         modbus_tls_port: state.modbus_tls_port,
+        opcua_port: state.opcua_port,
         tick_interval: state.device.tick_interval(),
         time_scale: state.time_scale,
         simulation: if state.device.is_running() {

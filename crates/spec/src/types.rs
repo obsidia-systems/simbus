@@ -178,7 +178,7 @@ impl ProtocolId {
     /// unimplemented.
     #[must_use]
     pub const fn is_implemented(self) -> bool {
-        matches!(self, Self::ModbusTcp | Self::ModbusTls)
+        matches!(self, Self::ModbusTcp | Self::ModbusTls | Self::Opcua)
     }
 }
 

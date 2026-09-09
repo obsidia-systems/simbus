@@ -4,7 +4,7 @@
 **Device language:** [spec.md](spec.md)  
 **HTTP session:** [control.md](control.md)  
 **Tick semantics:** [simulation.md](simulation.md)  
-**Field plane:** [modbus.md](modbus.md)  
+**Field plane:** [modbus.md](modbus.md) · [opcua.md](opcua.md)  
 **Shape of the process:** [architecture.md](architecture.md)
 
 This document is the contract of **the process**: one binary, one device,
@@ -26,7 +26,7 @@ The runtime MUST:
    ([spec.md](spec.md) §4 and §9).
 4. Instantiate the engine from that document.
 5. Start the tick loop, each requested field listener (Modbus TCP and/or
-   Modbus TLS), and the HTTP control plane.
+   Modbus TLS and/or OPC UA), and the HTTP control plane.
 6. Leave bundled scenarios **idle**.
 7. Exit on SIGINT or SIGTERM (see §6), or if a server task ends unexpectedly.
 
@@ -66,8 +66,10 @@ local JSON or YAML scenario file and POST JSON. It is an HTTP client
      `--modbus-tls-port` / `SIMBUS_MODBUS_TLS_PORT`; PEM paths from the
      binding then `--modbus-cert` / `--modbus-key` / `--modbus-ca`. If TLS is
      requested and a PEM path is missing or not a file, exit with an error
-     (do not start other listeners).
-   `--port` MUST NOT change the TLS port.
+     (do not start other listeners). `--port` MUST NOT change the TLS port.
+   - `opcua`: port from the binding (default 4840) then `--opcua-port` /
+     `SIMBUS_OPCUA_PORT`. `--opcua-port` MUST NOT enable OPC UA unless the
+     document has that binding.
 7. `Device::new(spec, seed, tick)`. `set_running(true)`.
 8. Spawn tick, each field listener, API.
 9. Log `simbus started`. Block until shutdown (§6) or a task failure (§5).
@@ -124,6 +126,7 @@ All settings use the `SIMBUS_` prefix when set via the environment.
 | `--modbus-cert` | `SIMBUS_MODBUS_CERT` | YAML `certfile` | Override TLS server certificate PEM path |
 | `--modbus-key` | `SIMBUS_MODBUS_KEY` | YAML `keyfile` | Override TLS server private key PEM path |
 | `--modbus-ca` | `SIMBUS_MODBUS_CA` | YAML `cafile` | Override optional client-CA PEM (mTLS) |
+| `--opcua-port` | `SIMBUS_OPCUA_PORT` | YAML (`4840` if omitted) | Override OPC UA listen port. Ignored unless the document has `opcua` |
 | `--name` / `-n` | `SIMBUS_DEVICE_NAME` | YAML `name` | Display name only |
 | `--api-port` | `SIMBUS_API_PORT` | `8000` | HTTP listen port |
 | `--host` | `SIMBUS_API_HOST` | `0.0.0.0` | HTTP bind address |
@@ -135,10 +138,12 @@ All settings use the `SIMBUS_` prefix when set via the environment.
 | `--api-key` | `SIMBUS_API_KEY` | — | If set, write endpoints require `x-api-key` or `Bearer` |
 | `--cors-origins` | `SIMBUS_CORS_ORIGINS` | `*` | Comma-separated origins |
 
-Modbus TCP and Modbus TLS bind `0.0.0.0` on their resolved ports
-([modbus.md](modbus.md)). There is no `SIMBUS_MODBUS_HOST` in this version.
+Modbus TCP, Modbus TLS, and OPC UA bind `0.0.0.0` on their resolved ports
+([modbus.md](modbus.md), [opcua.md](opcua.md)). There is no
+`SIMBUS_MODBUS_HOST` / `SIMBUS_OPCUA_HOST` in this version.
 CLI/env TLS paths and ports do not rewrite the YAML and do not enable TLS
-unless the document already has a `modbus-tls` binding.
+unless the document already has a `modbus-tls` binding. `--opcua-port` does
+not enable OPC UA unless the document already has an `opcua` binding.
 
 There is no `--type` / `SIMBUS_DEVICE_TYPE`.
 
@@ -167,6 +172,7 @@ this log.
 | Tick | `engine` (`Device::tick`) | If the task ends, the process MUST exit non-zero |
 | Modbus TCP | `modbus::serve` | Same (spawned only when a TCP binding is resolved) |
 | Modbus TLS | `modbus::serve_tls` | Same (spawned only when a TLS binding is resolved) |
+| OPC UA | `opcua::serve` | Same (spawned only when an OPC UA binding is resolved) |
 | HTTP | `control::serve` | Same |
 
 The tick loop sleeps `tick_interval` (wall seconds) and, when `is_running`
@@ -189,8 +195,8 @@ On non-Unix platforms, SIGINT (`ctrl_c`) is sufficient.
 
 Shutdown log: `simbus stopping`. Then:
 
-1. Stop accepting new HTTP and Modbus (TCP and TLS) connections (axum
-   graceful shutdown; tokio-modbus `serve_until`).
+1. Stop accepting new HTTP, Modbus (TCP and TLS), and OPC UA connections
+   (axum graceful shutdown; tokio-modbus `serve_until`; OPC UA `handle.cancel()`).
 2. Do not start another tick. The in-flight `tick(dt)` (synchronous, short)
    MAY finish.
 3. Wait up to `--shutdown-timeout` for in-flight HTTP to finish.

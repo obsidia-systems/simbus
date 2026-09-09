@@ -1,7 +1,7 @@
 # Architecture
 
 **Mode:** explanation (not a second copy of the YAML or HTTP tables)  
-**Contracts:** [spec.md](spec.md) · [runtime.md](runtime.md) · [modbus.md](modbus.md) · [control.md](control.md) · [simulation.md](simulation.md)
+**Contracts:** [spec.md](spec.md) · [runtime.md](runtime.md) · [modbus.md](modbus.md) · [opcua.md](opcua.md) · [control.md](control.md) · [simulation.md](simulation.md)
 
 simbus is one **process** that pretends to be one **field device**. A lab
 is many processes (Compose services), not one process with many maps.
@@ -17,8 +17,8 @@ GitHub renders the Mermaid below. Syntax follows current
 ## 1. Context
 
 Operators boot a YAML file. SCADA talks Modbus TCP (and optionally TLS on
-IANA 802) to the listen port.
-Tests and GUIs talk HTTP to the control port. The two planes share one
+IANA 802 and/or OPC UA on IANA 4840) to the listen ports.
+Tests and GUIs talk HTTP to the control port. The planes share one
 in-memory bank; they are not two devices.
 
 ```mermaid
@@ -28,13 +28,16 @@ flowchart LR
         gui[GUI / curl / CI]
         subgraph proc [One simbus process]
             mb[Modbus TCP / TLS]
+            ua[OPC UA]
             http[HTTP control]
             bank[(RegisterBank)]
             mb --- bank
+            ua --- bank
             http --- bank
         end
     end
-    scada -->|FC1 to FC16| mb
+    scada -->|FC1 to FC16 / UA read| mb
+    scada --> ua
     gui -->|REST and SSE| http
 ```
 
@@ -54,16 +57,20 @@ flowchart TB
     runtime[runtime / binary simbus]
     control[control]
     modbusCrate[modbus]
+    opcuaCrate[opcua]
     engine[engine]
     spec[spec]
     runtime --> control
     runtime --> modbusCrate
+    runtime --> opcuaCrate
     runtime --> engine
     control --> engine
     modbusCrate --> engine
+    opcuaCrate --> engine
     engine --> spec
     control --> spec
     modbusCrate --> spec
+    opcuaCrate --> spec
 ```
 
 | Crate | Owns | Must not |
@@ -71,7 +78,8 @@ flowchart TB
 | `spec` | YAML parse and `simbus check` | Open ports, tick |
 | `engine` | Bank, `tick(dt)`, faults, steps | Sockets, SSE, health logs |
 | `modbus` | TCP / TLS slave, V1.1b3 PDU | HTTP, tick |
-| `control` | Session HTTP + SSE | Modbus listen |
+| `opcua` | OPC UA server, YAML map as variables | HTTP, tick |
+| `control` | Session HTTP + SSE | Field listen |
 | `runtime` | CLI, boot, tick / field listeners / HTTP, signals | A second YAML dialect |
 
 CI is `cargo test --workspace --locked`. Per crate (no Markdown next to the
@@ -83,7 +91,8 @@ crate; contracts are in this folder):
 | `engine` | `cargo test -p engine` | `src/behaviors.rs`, `src/encode.rs`; `tests/engine.rs` |
 | `control` | `cargo test -p control` | `tests/http.rs` (probes, PATCH, faults, scenarios, API key, SSE) |
 | `modbus` | `cargo test -p modbus --locked` | FC1–FC4 / 5 / 6 / 15 / 16, exceptions 02 / 03, FC3 over TLS |
-| `runtime` (`-p simbus`) | `cargo test -p simbus --locked` | clap (`--file`, `--tick`, `--time-scale`, `--seed`, TLS flags, `check`, `ctl`); default template |
+| `opcua` | `cargo test -p opcua --locked` | T&H `holding/temperature` over Anonymous/None |
+| `runtime` (`-p simbus`) | `cargo test -p simbus --locked` | clap (`--file`, `--tick`, `--time-scale`, `--seed`, TLS/UA flags, `check`, `ctl`); default template |
 
 Device YAML is validated with `simbus check`, not a Rust test per file.
 
@@ -91,7 +100,7 @@ On disk this is the whole product (no Python package, no `scenarios/` folder):
 
 ```text
 simbus/
-├── crates/{spec,engine,control,modbus,runtime}
+├── crates/{spec,engine,control,modbus,opcua,runtime}
 ├── devices/{builtin,community}
 ├── docs/
 ├── Dockerfile

@@ -1,6 +1,6 @@
 # simbus
 
-> Industrial field-device simulator: one process, one YAML, Modbus TCP (and TLS on 802) plus HTTP control.
+> Industrial field-device simulator: one process, one YAML, Modbus TCP (and TLS on 802), OPC UA on 4840, plus HTTP control.
 
 This file is a **documentation map** for agents (same role as `/llms.txt` on a docs site). For how to **change this codebase**, read [AGENTS.md](AGENTS.md). Branch model and PR target (`develop`): [CONTRIBUTING.md](CONTRIBUTING.md). For **authoring a device YAML**, use the project skill [simbus-device](.agents/skills/simbus-device/SKILL.md) (`npx skills add obsidia-systems/simbus@simbus-device`).
 
@@ -11,6 +11,7 @@ Human front door: [README.md](README.md). Contracts live in `docs/` and win over
 - [docs/spec.md](docs/spec.md): Device YAML language (boot contract). Start here for new fields or protocols.
 - [docs/runtime.md](docs/runtime.md): Binary, boot, CLI/env, signals, Docker, time scale, drain.
 - [docs/modbus.md](docs/modbus.md): Field plane — Modbus TCP PDU (V1.1b3 / V1.0b) and TLS wrap (IANA `mbaps` 802).
+- [docs/opcua.md](docs/opcua.md): Field plane — OPC UA (IANA 4840), YAML map as variables. None + Anonymous.
 - [docs/control.md](docs/control.md): Session HTTP (not the field protocol). OpenAPI at `GET /docs` on a running process.
 - [docs/simulation.md](docs/simulation.md): Tick, `state.base`, behaviors, faults, encode.
 - [docs/scenarios.md](docs/scenarios.md): How to run scenarios bundled in the device YAML (and session install).

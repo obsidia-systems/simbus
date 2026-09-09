@@ -81,10 +81,10 @@ GET (including SSE) is not keyed. Missing/wrong key on a write MUST 401.
 
 | Method | Path | Notes |
 | --- | --- | --- |
-| `GET` | `/status` | Live: name, type, **listen** Modbus TCP port, `modbus_tls_port` (`null` if no TLS binding), tick, `time_scale`, `running`/`stopped`, field plane `listening`/`stopped` |
+| `GET` | `/status` | Live: name, type, Modbus TCP port, `modbus_tls_port` / `opcua_port` (`null` if that binding is absent), tick, `time_scale`, `running`/`stopped`, field plane `listening`/`stopped` |
 | `GET` | `/config` | Document snapshot: map, `spec_version`, endianness, YAML `modbus.default_port`, bundled scenarios |
 | `GET` | `/healthz` | Liveness (always 200 if the task is up) |
-| `GET` | `/readyz` | 200 when **every** requested field listener is up **and** the simulation is running; else 503 (paused → 503). TLS-only: TCP is not required. Dual-bind: both TCP and TLS |
+| `GET` | `/readyz` | 200 when **every** requested field listener is up **and** the simulation is running; else 503 (paused → 503). TLS-only or OPC UA-only: TCP is not required. Dual-bind: every listed plane |
 | `GET` | `/metrics` | Prometheus text |
 | `GET` | `/docs` | Swagger UI |
 | `GET` | `/api-docs/openapi.json` | OpenAPI 3. The document MUST list every route in this section |
@@ -92,6 +92,8 @@ GET (including SSE) is not keyed. Missing/wrong key on a write MUST 401.
 `/status.modbus_port` is the cleartext TCP listen port (`--port`).
 `/status.modbus_tls_port` is the TLS listen port, or JSON `null` when the
 document has no `modbus-tls` binding.
+`/status.opcua_port` is the OPC UA listen port, or JSON `null` when the
+document has no `opcua` binding.
 `/config.modbus_port` is the YAML `modbus.default_port`. TCP listen and YAML
 default differ when CLI overrides `--port`.
 

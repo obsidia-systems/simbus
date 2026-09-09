@@ -12,7 +12,7 @@ and operator training — **no hardware required**.
 [![tokio-modbus](https://img.shields.io/badge/tokio--modbus-0.17-blueviolet?style=flat-square)](https://github.com/slowtec/tokio-modbus)
 [![axum](https://img.shields.io/badge/axum-0.8-009688?style=flat-square)](https://github.com/tokio-rs/axum)
 
-> **Each container = one device.** Modbus TCP server + simulation engine + REST control API.
+> **Each container = one device.** Field plane (Modbus TCP, optional TLS on 802, optional OPC UA on 4840) + simulation engine + REST control API.
 > Stack as many as you need. Works with Ignition, Wonderware, FactoryTalk, and any Modbus client.
 
 ```mermaid
@@ -90,6 +90,7 @@ curl http://localhost:8000/status
   "type": "tnh_sensor",
   "modbus_port": 502,
   "modbus_tls_port": null,
+  "opcua_port": null,
   "tick_interval": 1.0,
   "time_scale": 1.0,
   "simulation": "running",
@@ -147,6 +148,28 @@ simbus --file device.yaml --modbus-cert cert.pem --modbus-key key.pem
 
 Compose does not mount TLS by default. Add a volume and the binding when you
 want the lab.
+
+### OPC UA (IANA 4840)
+
+Builtin maps stay **Modbus TCP only**. To expose the same YAML bank as OPC UA
+variables, add an `opcua` binding (and keep `modbus-tcp` if you want both 502
+and 4840). This version serves SecurityPolicy None + Anonymous only:
+
+```yaml
+bindings:
+  - protocol: modbus-tcp
+  - protocol: opcua
+    port: 4840
+```
+
+```bash
+simbus --file device.yaml
+# UA Expert: opc.tcp://127.0.0.1:4840  (accept None / Anonymous)
+```
+
+NodeIds are `ns=N;s=holding/{name}` (and `input/`, `coils/`, `discrete/`).
+Values are engineering units (T&H `holding/temperature` ≈ 22.5). Compose does
+not publish 4840 by default; add `4840:4840` when you want the lab.
 
 > [!NOTE]
 > **Requirements:** Rust 1.85+ (MSRV; edition 2024). Toolchain file tracks
@@ -500,6 +523,10 @@ curl -X POST http://localhost:8000/faults \
 # 3. After 60 seconds fault expires, alarm auto-clears
 ```
 
+OPC UA (when the YAML lists `protocol: opcua`): in **UA Expert** connect to
+`opc.tcp://127.0.0.1:4840`, accept SecurityPolicy **None** and **Anonymous**.
+Browse `Objects → Holding` (engineering values, e.g. temperature ≈ 22.5).
+
 ---
 
 ## Device YAML Schema
@@ -634,6 +661,8 @@ All settings use the `SIMBUS_` prefix and can be set via environment variables o
 | --- | --- | --- |
 | `SIMBUS_YAML_PATH` | default template | Path to a device YAML (`--file`). Omitted → `devices/builtin/default.yaml` (cwd, else embedded) |
 | `SIMBUS_MODBUS_PORT` | device YAML default | Override Modbus TCP listen port |
+| `SIMBUS_MODBUS_TLS_PORT` | YAML (`802` if omitted) | Override Modbus TLS listen port. Ignored unless the document has `modbus-tls` |
+| `SIMBUS_OPCUA_PORT` | YAML (`4840` if omitted) | Override OPC UA listen port. Ignored unless the document has `opcua` |
 | `SIMBUS_API_HOST` | `0.0.0.0` | REST API bind address |
 | `SIMBUS_API_PORT` | `8000` | REST API listen port |
 | `SIMBUS_TICK_INTERVAL` | `1.0` | Wall sample period in seconds (`--tick`) |
@@ -665,7 +694,7 @@ Typical events include:
 
 - `loading device yaml` / `loading default template` / `loading embedded default template`
 - `simbus started` / `simbus stopping`
-- `api listening` / `modbus server listening`
+- `api listening` / `modbus server listening` / `opcua listening`
 - `fault injected` / `fault expired` / `faults cleared` / `simulation reset`
 - `simulation paused` / `simulation resumed`
 - `simulation base changed` / `alarm activated` / `alarm cleared` / `discrete changed`
@@ -809,6 +838,7 @@ npx skills add obsidia-systems/simbus@simbus-device
 - [docs/spec.md](docs/spec.md) — Device YAML language (boot contract).
 - [docs/runtime.md](docs/runtime.md) — Binary, boot, CLI/env, signals, Docker.
 - [docs/modbus.md](docs/modbus.md) — Field plane: Modbus TCP (V1.1b3 / V1.0b).
+- [docs/opcua.md](docs/opcua.md) — Field plane: OPC UA (IANA 4840), YAML map as variables.
 - [docs/control.md](docs/control.md) — Session HTTP (not the field protocol).
 - [docs/simulation.md](docs/simulation.md) — Tick, `state.base`, behaviors, faults.
 - [docs/scenarios.md](docs/scenarios.md) — How to run bundled scenarios.
@@ -835,8 +865,8 @@ timeline
     title simbus Roadmap
     v0.1 — Core : Modbus TCP, 7 templates, 6 behaviors, REST plus SSE, faults, Docker
     v0.2 — Scenarios : Playback API, recipes later moved into device YAML
-    v0.3 — Rust workspace : this tree — tokio-modbus, axum, file-only boot, pause, session scenarios, Modbus TLS 802, healthz/readyz/metrics
-    Specified not served : MQTT Sparkplug, SNMP v2c, BACnet/IP, OPC UA, Modbus RTU
+    v0.3 — Rust workspace : this tree — tokio-modbus, axum, file-only boot, pause, session scenarios, Modbus TLS 802, OPC UA 4840, healthz/readyz/metrics
+    Specified not served : MQTT Sparkplug, SNMP v2c, BACnet/IP, Modbus RTU
 ```
 
 Unimplemented protocol **syntax** is already valid YAML (`simbus check` notes it;

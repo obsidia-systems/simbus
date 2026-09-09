@@ -30,8 +30,10 @@ fn tnh_state_with_key(api_key: Option<String>) -> AppState {
         api_key,
         modbus_port: 5020,
         modbus_tls_port: None,
+        opcua_port: None,
         modbus_ready: Arc::new(AtomicBool::new(true)),
         modbus_tls_ready: Arc::new(AtomicBool::new(true)),
+        opcua_ready: Arc::new(AtomicBool::new(true)),
         scenario_task: Arc::new(Mutex::new(None)),
         snapshots,
         time_scale: 1.0,
@@ -63,6 +65,7 @@ async fn status_reports_device() {
     assert_eq!(json["name"], "Generic T&H Sensor");
     assert_eq!(json["modbus_port"], 5020);
     assert!(json["modbus_tls_port"].is_null());
+    assert!(json["opcua_port"].is_null());
     assert_eq!(json["simulation"], "running");
     assert_eq!(json["time_scale"], 1.0);
 }
@@ -354,6 +357,38 @@ async fn readyz_tls_only() {
         .await
         .unwrap();
     assert_eq!(response.status(), StatusCode::OK);
+}
+
+#[tokio::test]
+async fn status_and_readyz_opcua() {
+    let mut state = tnh_state();
+    state.opcua_port = Some(4840);
+    state.opcua_ready = Arc::new(AtomicBool::new(false));
+    let app = control::router(state.clone(), &["*".to_owned()]);
+    let status = app
+        .clone()
+        .oneshot(Request::get("/status").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    let body = status.into_body().collect().await.unwrap().to_bytes();
+    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(json["opcua_port"], 4840);
+    assert_eq!(json["modbus_server"], "stopped");
+    let readyz = app
+        .oneshot(Request::get("/readyz").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    assert_eq!(readyz.status(), StatusCode::SERVICE_UNAVAILABLE);
+
+    state
+        .opcua_ready
+        .store(true, std::sync::atomic::Ordering::SeqCst);
+    let app = control::router(state, &["*".to_owned()]);
+    let readyz = app
+        .oneshot(Request::get("/readyz").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    assert_eq!(readyz.status(), StatusCode::OK);
 }
 
 #[tokio::test]

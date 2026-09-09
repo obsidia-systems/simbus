@@ -303,3 +303,30 @@ registers:
     let report = device_report("mtls.yaml", &spec);
     assert!(report.contains("modbus-tls :8802 mTLS"));
 }
+
+#[test]
+fn opcua_is_implemented_with_default_port() {
+    let yaml = r"
+name: ua-box
+version: '1.0'
+type: meter
+modbus:
+  default_port: 502
+bindings:
+  - protocol: opcua
+registers:
+  holding:
+    - address: 0
+      name: watts
+      default: 1.0
+";
+    let spec = load_device_from_str(yaml).unwrap();
+    assert!(spec.unimplemented_protocols().is_empty());
+    match &spec.resolved_bindings()[0] {
+        spec::BindingSpec::Opcua { port } => assert_eq!(*port, 4840),
+        other => panic!("expected opcua, got {other:?}"),
+    }
+    let report = device_report("opcua.yaml", &spec);
+    assert!(!report.contains("specified, not implemented"));
+    assert!(report.contains("opcua :4840"));
+}
