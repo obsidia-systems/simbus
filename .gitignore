@@ -1,20 +1,11 @@
-# Python-generated files
-__pycache__/
-*.py[oc]
-build/
-dist/
-wheels/
-*.egg-info
+# Rust
+/target/
+**/*.rs.bk
+Cargo.lock.bak
 
-# Virtual environments
-.venv
-
+# Editor / OS
 .vscode/
-
-.pytest_cache/
-
+.idea/
 .claude/
-
-.ruff_cache/
-.mypy_cache/
-.coverage
+.cursor/
+.DS_Store

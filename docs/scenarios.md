@@ -1,548 +1,141 @@
-# Scenario Engine — Reference Guide
+# Scenarios
 
-This document covers the scenario engine in full: how to write scenario YAML files,
-what each step type does, how the runner executes them, and practical recipes for
-alarm pipeline testing and operator training.
+Timed event sequences are part of the **device contract**. Syntax, ids, and
+validation rules live in [spec.md](spec.md) §7. How to start and stop them
+on a running process lives in [control.md](control.md).
 
----
+This page is a short operator guide.
 
-## Table of Contents
-
-- [What is a Scenario?](#what-is-a-scenario)
-- [Writing a Scenario YAML](#writing-a-scenario-yaml)
-- [Step Types](#step-types)
-  - [set_register](#set_register)
-  - [inject_fault](#inject_fault)
-  - [set_coil](#set_coil)
-  - [set_tick_interval](#set_tick_interval)
-- [How the Runner Works](#how-the-runner-works)
-- [API Endpoints](#api-endpoints)
-- [Practical Recipes](#practical-recipes)
+Syntax: [spec.md](spec.md) §7. HTTP: [control.md](control.md). Process shape:
+[architecture.md](architecture.md).
 
 ---
 
-## What is a Scenario?
+## Where they live
 
-A **scenario** is a timed sequence of simulation events stored in a YAML file.
-Instead of calling the REST API manually at the right moment, you define the entire
-sequence once and replay it on demand via `POST /scenarios/{name}/run`.
+Inside the device YAML, under `scenarios:`. Example: `heat-wave` on
+`devices/builtin/generic-tnh-sensor.yaml`, `power-outage` on
+`devices/builtin/generic-ups.yaml`, `demo-spike` on
+`devices/builtin/default.yaml`.
 
-Scenarios are ideal for:
+They are **not** loaded from a global `scenarios/` folder. That catalog does
+not exist in this repository. `default.yaml` ships `demo-spike`.
 
-- **Alarm pipeline testing** — verify that SCADA correctly detects, displays, and
-  notifies on a sequence of abnormal conditions.
-- **Operator training** — create realistic events (power outage, thermal runaway,
-  sensor failure) that trainees must respond to.
-- **CI / automated testing** — reproducible event sequences that can be triggered
-  from a test script or CI pipeline.
-- **Demos** — show a client how the BMS/SCADA responds to a full event chain without
-  touching real hardware.
+A running process can also take a **session copy** (`POST /scenarios`, JSON
+with the same fields). It is RAM-only, validated against the loaded map, and
+gone when the process exits. Prefer putting recipes in the device YAML so
+`simbus check` sees them.
 
-The runner executes steps in a **separate asyncio task** — the main simulation tick
-loop is never blocked. A step with `at: 60` simply sleeps until 60 real seconds have
-elapsed from the start of the scenario.
+`simbus check` validates every step against this device's points (language 2)
+or registers and coils (language 1).
+A scenario that names `on_battery_alarm` on a UPS whose coil is `on_battery`
+MUST fail check — it MUST NOT fail silently at run time.
 
----
+`heat-wave`, bundled on `devices/builtin/generic-tnh-sensor.yaml`, is the
+one to read first. Each bar is how long the value written by that step is
+what a poller sees:
 
-## Writing a Scenario YAML
-
-Scenarios live in the `scenarios/` directory (at repo root) or in a `scenarios/`
-folder next to the executable. Files must end in `.yaml`.
-
-```yaml
-name: "Power Outage Sequence"
-description: >
-  Simulates a mains power loss and UPS switchover.
-  Tests on-battery and low-battery alarm firing.
-steps:
-  - at: 0
-    action: set_register
-    register_name: input_voltage
-    value: 0.0
-
-  - at: 2
-    action: set_coil
-    coil: on_battery_alarm
-    value: true
-
-  - at: 5
-    action: set_register
-    register_name: battery_soc
-    value: 40.0
-
-  - at: 120
-    action: inject_fault
-    fault_type: alarm
-    register_name: low_battery_alarm
-    duration_s: 30
+```mermaid
+gantt
+    title heat-wave (generic T&H) on the simulation clock
+    dateFormat X
+    axisFormat %Ss
+    tickInterval 5second
+    section temperature
+    22.0 C                          :0, 2
+    25.0 C                          :2, 5
+    30.0 C (high_temp_alarm fires)  :active, 5, 10
+    35.0 C (held after the run)     :active, 10, 50
+    section faults
+    spike 42.0 C, duration_s 30     :crit, 12, 42
+    section clock
+    tick_interval 0.5 s             :done, 15, 45
 ```
 
-### Top-level fields
+Three things that plot makes concrete. The `spike` fault is the only step
+with a **length** (`duration_s: 30`): it ends at 42 s on its own, and the
+temperature underneath it is still 35 °C when it does. `high_temp_alarm` is
+never written by the scenario — it has a `trigger:` at 30 °C and fires by
+itself. And the last `set_point` is not an ending: 35 °C stays after the
+runner is done, so a test that expects the device to return to normal must
+either say so in a final step or `POST /simulation/reset`.
 
-| Field | Type | Required | Description |
-|---|---|---|---|
-| `name` | string | yes | Human-readable name |
-| `description` | string | no | What the scenario tests or demonstrates |
-| `steps` | list | yes | At least one step. Order does not matter — runner sorts by `at` |
-
-### Common step fields
-
-Every step must declare:
-
-| Field | Type | Description |
-|---|---|---|
-| `action` | string | Step discriminator: `set_register`, `inject_fault`, `set_coil`, `set_tick_interval` |
-| `at` | float ≥ 0 | Seconds from scenario start when this step executes |
-
----
-
-## Step Types
-
----
-
-### set_register
-
-Writes a real-world value to a holding or input register. The runner looks up the
-register by **name** (not address), converts the real-world value using the register's
-`scale`, and writes the raw integer to the store. It also calls `engine.update_base()`
-so the simulation continues from the new operating point.
-
-```yaml
-- at: 0
-  action: set_register
-  register_name: temperature
-  value: 35.0
-  register_type: holding   # default; can also be "input"
-```
-
-| Field | Type | Required | Description |
-|---|---|---|---|
-| `register_name` | string | yes | Name of the target register (must exist on the device) |
-| `value` | float | yes | Real-world value (before scale) |
-| `register_type` | string | no | `holding` (default) or `input` |
-
-If the register name is not found, the step is skipped with a warning log.
-
----
-
-### inject_fault
-
-Injects a fault with automatic expiry, exactly like `POST /faults` via the REST API.
-
-```yaml
-- at: 10
-  action: inject_fault
-  fault_type: spike
-  register_name: temperature
-  value: 45.0
-  duration_s: 60
-```
-
-| Field | Type | Required | Description |
-|---|---|---|---|
-| `fault_type` | string | yes | `spike`, `freeze`, `dropout`, `noise_amplify`, `alarm` |
-| `register_name` | string \| null | no | Target register or coil name. `null` for device-wide dropout |
-| `value` | float \| null | no | Fault parameter (spike target, noise multiplier, etc.) |
-| `duration_s` | float > 0 | yes | Seconds until the fault expires |
-
-See [docs/simulation.md](docs/simulation.md) — Fault Injection section for the full
-behavior of each fault type.
-
----
-
-### set_coil
-
-Forces a coil or discrete input to `true` or `false`. The runner looks up the coil
-by name in both the `coils` and `discrete` registers and writes the value to the
-correct store.
-
-```yaml
-- at: 5
-  action: set_coil
-  coil: high_temp_alarm
-  value: true
-```
-
-| Field | Type | Required | Description |
-|---|---|---|---|
-| `coil` | string | yes | Name of the coil or discrete input |
-| `value` | bool | yes | Target boolean state |
-
-If the coil name is not found, the step is skipped with a warning log.
-
----
-
-### set_tick_interval
-
-Changes the simulation tick interval mid-scenario. Use this to speed up slow
-sections or slow down critical moments so observers can watch alarms fire in real time.
-
-```yaml
-- at: 0
-  action: set_tick_interval
-  tick_interval: 0.1     # 10 ticks per second — fast-forward
-
-- at: 60
-  action: set_tick_interval
-  tick_interval: 1.0     # back to normal speed
-```
-
-| Field | Type | Required | Description |
-|---|---|---|---|
-| `tick_interval` | float > 0 | yes | New tick interval in seconds |
-
----
-
-## How the Runner Works
+The `tick_interval` bar is wall-clock plumbing, not physics: it makes the
+sampling finer for the spike window without changing the trajectory
+([simulation.md](simulation.md) §2).
 
 ```mermaid
 sequenceDiagram
-    participant API as REST API
-    participant Runner as ScenarioRunner
-    participant Loop as asyncio loop
-    participant Engine as SimulationEngine
-
-    API->>Runner: POST /scenarios/{name}/run
-    Runner->>Runner: sort steps by `at`
-    Runner->>Loop: create_task(_run_loop)
-    activate Loop
-
-    Note over Loop: Step 1: at=0s
-    Loop->>Engine: execute(step)
-    Engine-->>Loop: ack
-    Loop->>Runner: update_status(step_index=1)
-
-    Note over Loop: Step 2: at=2s
-    Loop->>Loop: sleep(2.0)
-    Loop->>Engine: execute(step)
-    Engine-->>Loop: ack
-    Loop->>Runner: update_status(step_index=2)
-
-    Note over Loop: ...
-
-    Note over Loop: Last step completed
-    Loop->>Runner: state = "completed"
-    deactivate Loop
-```
-
-```mermaid
-flowchart LR
-    subgraph runner["ScenarioRunner"]
-        direction TB
-        sort["sort steps by at"]
-        loop["for each step:<br/>1. sleep(at - elapsed)<br/>2. execute(step)<br/>3. update status"]
-        sort --> loop
+    autonumber
+    actor Op as Operator
+    participant HTTP as control
+    participant Run as ScenarioRunner
+    participant Dev as Device
+    Op->>HTTP: POST /scenarios/heat-wave/run
+    HTTP->>Run: start id heat-wave
+    loop wall-clock steps
+        Run->>Dev: apply_step
     end
-
-    api["POST /scenarios/run"]
-    task["asyncio task"]
-    engine["SimulationEngine"]
-    store[("RegisterStore")]
-
-    api --> runner
-    runner -->|creates| task
-    task -->|set_register<br/>inject_fault<br/>set_coil<br/>set_tick_interval| engine
-    engine --> store
+    Op->>HTTP: POST /scenarios/stop
+    HTTP->>Run: cancel
 ```
-
-### Key behaviors
-
-- **Sorting:** Steps are sorted by `at` before execution. Defining them out of order
-  in the YAML is perfectly valid.
-- **Sleep precision:** The runner uses `asyncio.get_event_loop().time()` for wall-clock
-  timing, not `elapsed_s` from the simulation engine. A step with `at: 60` fires
-  approximately 60 real seconds after the scenario starts.
-- **Cancellation:** Calling `POST /scenarios/stop` (or `runner.stop()`) cancels the
-  internal task immediately. The scenario does not resume — it transitions to
-  `state: "stopped"`.
-- **One at a time:** Starting a new scenario while another is running cancels the old
-  one first. There is never more than one active scenario per device.
-- **No persistence:** Scenarios do not survive a process restart. If you need a
-  scenario to start automatically at boot, use a startup script or systemd timer
-  that calls `POST /scenarios/{name}/run` after the container health check passes.
 
 ---
 
-## API Endpoints
+## Run
 
-Interactive docs at `http://localhost:8000/docs` (Swagger UI).
-
-### List scenarios
-
-```bash
-curl http://localhost:8000/scenarios
-```
-
-Returns a list of available scenario files discovered in `./scenarios/` (repo root)
-and the built-in scenarios folder.
-
-```json
-[
-  {"name": "heat-wave", "description": "Gradual temperature rise with spike"}
-]
-```
-
-### Start a scenario
+The process starts idle. Then:
 
 ```bash
 curl -X POST http://localhost:8000/scenarios/heat-wave/run
-```
-
-```json
-{"status": "started", "scenario": "heat-wave", "steps": 7}
-```
-
-If the scenario file does not exist, returns `404`.
-
-### Get active scenario status
-
-```bash
 curl http://localhost:8000/scenarios/active
-```
-
-```json
-{
-  "state": "running",
-  "scenario_name": "heat-wave",
-  "step_index": 3,
-  "total_steps": 7,
-  "elapsed_s": 5.234
-}
-```
-
-States: `idle`, `running`, `completed`, `stopped`.
-
-### Stop a scenario
-
-```bash
 curl -X POST http://localhost:8000/scenarios/stop
+# pause the clock (scenario wall waits freeze too)
+curl -X PATCH http://localhost:8000/simulation -d '{"running": false}'
+curl -X PATCH http://localhost:8000/simulation -d '{"running": true}'
 ```
 
-Returns `204 No Content`. Safe to call even when no scenario is running.
+The runner sorts steps by `at` (simulation seconds) and sleeps
+`at / time_scale` of wall clock without blocking the tick loop. Default
+scale is 1 (1:1). Step types: `set_point`, `inject_fault`,
+`set_tick_interval`, plus the address-oriented `set_register` / `set_coil`
+that language-1 documents used — see spec.md.
 
----
-
-## Practical Recipes
-
-### Recipe 1 — Test a complete thermal runaway event
-
-```yaml
-name: "Thermal Runaway"
-description: "Temperature climbs, alarms fire, SCADA must respond."
-steps:
-  - at: 0
-    action: set_register
-    register_name: temperature
-    value: 22.0
-
-  - at: 10
-    action: set_register
-    register_name: temperature
-    value: 28.0       # approaching threshold
-
-  - at: 20
-    action: set_register
-    register_name: temperature
-    value: 32.0       # crosses 30.0°C threshold → high_temp_alarm fires
-
-  - at: 30
-    action: inject_fault
-    fault_type: spike
-    register_name: temperature
-    value: 45.0
-    duration_s: 60    # extreme spike for 60 seconds
-
-  - at: 40
-    action: set_register
-    register_name: temperature
-    value: 35.0       # remains above threshold after spike expires
-
-  - at: 120
-    action: set_register
-    register_name: temperature
-    value: 22.0       # recovery
-```
+There is **one** runner per process, so every way of leaving `Running` ends
+in the same place:
 
 ```mermaid
-sequenceDiagram
-    participant Scenario as ScenarioRunner
-    participant Reg as temperature register
-    participant Coil as high_temp_alarm coil
-    participant SCADA as 🖥️ SCADA/Ignition
-
-    Note over Scenario: at=0s
-    Scenario->>Reg: set 22.0°C
-    Reg-->>SCADA: Modbus read: 220
-
-    Note over Scenario: at=10s
-    Scenario->>Reg: set 28.0°C
-    Reg-->>SCADA: 280
-    Note right of SCADA: Alarm still clear<br/>(threshold 30°C)
-
-    Note over Scenario: at=20s
-    Scenario->>Reg: set 32.0°C
-    Reg-->>Coil: trigger gt 30.0
-    Coil-->>SCADA: true
-    Note right of SCADA: 🚨 Alarm fires!
-
-    Note over Scenario: at=30s
-    Scenario->>Reg: spike 45.0°C / 60s
-    Reg-->>SCADA: 450
-    Note right of SCADA: Escalation / paging
-
-    Note over Scenario: at=90s
-    Note over Reg: spike expires
-    Reg-->>SCADA: ~350 (still > 30°C)
-    Note right of SCADA: Alarm stays active
-
-    Note over Scenario: at=120s
-    Scenario->>Reg: set 22.0°C
-    Reg-->>Coil: trigger gt 30.0
-    Coil-->>SCADA: false
-    Note right of SCADA: ✅ Alarm clears
+stateDiagram-v2
+    [*] --> Idle: boot
+    Idle --> Running: POST /scenarios/{id}/run
+    Running --> Running: run another id (aborts the first)
+    Running --> Paused: PATCH /simulation running false
+    Paused --> Running: PATCH /simulation running true
+    Running --> Idle: last step applied
+    Running --> Idle: POST /scenarios/stop
+    Running --> Idle: DELETE the active session id
+    Paused --> Idle: POST /scenarios/stop
 ```
 
-Use this to verify that your SCADA:
+Two consequences that surprise people. Starting a second scenario does not
+queue it — it cancels the first mid-flight, and whatever the first had
+already written stays written. And `Paused` freezes the scenario's wall
+waits along with the tick, so a paused device does not silently burn through
+the rest of the timeline; `at:` stops advancing until you resume.
 
-1. Detects the alarm at 20 seconds.
-2. Escalates or pages when the spike hits at 30 seconds.
-3. Does not clear the alarm prematurely when the spike expires (temperature is still > 30°C).
-4. Clears the alarm only after the recovery step at 120 seconds.
+Leaving `Running` never rewinds the device. Values written by the steps that
+already ran stay as they are: `POST /simulation/reset` is the only way back
+to boot state ([simulation.md](simulation.md) §6).
 
 ---
 
-### Recipe 2 — Simulate UPS power failure sequence
+## Writing a new one
 
-```yaml
-name: "UPS Power Failure"
-description: "Mains drops, UPS switches to battery, then drains."
-steps:
-  - at: 0
-    action: set_register
-    register_name: input_voltage
-    value: 0.0
+1. Add a block with a kebab-case `id` to the device YAML.
+2. Drive the map with `set_point` and `inject_fault` (`point:`), naming ids
+   that exist on **that** document.
+3. Run `simbus check path/to/device.yaml`.
+4. Boot the device and `POST /scenarios/{id}/run`.
 
-  - at: 2
-    action: set_coil
-    coil: on_battery_alarm
-    value: true
-
-  - at: 5
-    action: set_register
-    register_name: battery_soc
-    value: 80.0
-
-  - at: 60
-    action: set_register
-    register_name: battery_soc
-    value: 50.0
-
-  - at: 120
-    action: set_register
-    register_name: battery_soc
-    value: 20.0       # crosses low-battery threshold
-
-  - at: 125
-    action: set_coil
-    coil: low_battery_alarm
-    value: true
-
-  - at: 180
-    action: set_register
-    register_name: battery_soc
-    value: 5.0
-
-  - at: 200
-    action: set_coil
-    coil: on_battery_alarm
-    value: false
-
-  - at: 200
-    action: set_coil
-    coil: low_battery_alarm
-    value: false
-```
-
----
-
-### Recipe 3 — Fast alarm debounce test
-
-Speed up the simulation so the entire event chain completes in 10 real seconds
-instead of 200. Useful for CI pipelines that can't wait minutes.
-
-```yaml
-name: "Fast Alarm Test"
-description: "Accelerated thermal event for CI."
-steps:
-  - at: 0
-    action: set_tick_interval
-    tick_interval: 0.1     # 10× speed
-
-  - at: 0.5
-    action: set_register
-    register_name: temperature
-    value: 35.0            # fires alarm immediately
-
-  - at: 2.0
-    action: set_register
-    register_name: temperature
-    value: 22.0            # clears alarm
-
-  - at: 2.5
-    action: set_tick_interval
-    tick_interval: 1.0     # restore normal speed
-```
-
-This scenario completes in ~3 real seconds.
-
----
-
-### Recipe 4 — Sensor freeze during a load test
-
-Freeze the temperature sensor while load increases, simulating a stuck sensor
-that fails to report the real thermal condition.
-
-```yaml
-name: "Stuck Sensor"
-description: "Temperature sensor freezes while room actually heats up."
-steps:
-  - at: 0
-    action: set_register
-    register_name: temperature
-    value: 22.0
-
-  - at: 5
-    action: inject_fault
-    fault_type: freeze
-    register_name: temperature
-    duration_s: 60
-
-  - at: 10
-    action: set_register
-    register_name: supply_temp    # another register showing real heat
-    value: 40.0
-```
-
-Verify that SCADA raises a "stale data" or "sensor fault" alarm when the
-frozen value does not change while other thermal indicators rise.
-
----
-
-### Recipe 5 — Communication loss recovery test
-
-Drop the entire device, then restore it, verifying that the SCADA reconnects
-and resumes polling without manual intervention.
-
-```yaml
-name: "Comm Loss"
-description: "Simulate 15 seconds of device-wide communication loss."
-steps:
-  - at: 0
-    action: inject_fault
-    fault_type: dropout
-    register_name: null        # device-wide
-    duration_s: 15
-```
-
-No other steps needed — the dropout fault sets all holding registers to `0`
-for 15 seconds and then automatically clears.
+Do not add a Rust test per scenario. Check is the compiler. Session upload
+(`POST /scenarios`) is for a live process, not a substitute for the YAML.

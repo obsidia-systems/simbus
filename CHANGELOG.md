@@ -7,6 +7,203 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [0.3.0] — 2026-09-09
+
+### Added
+
+- Rust rewrite of the 0.2.x Python runtime: workspace crates `spec`,
+  `engine`, `control`, `modbus`, and binary package `simbus`
+  (`crates/runtime`). MSRV 1.85, edition 2024 (tokio, axum, tokio-modbus).
+  The Docker image builds that binary (`cargo build --release -p simbus`).
+- `simbus check <file>` — validate a device YAML and print a configuration
+  summary without starting Modbus or the API. CI runs it on every file under
+  `devices/`.
+- `devices/builtin/default.yaml` — official example template used when
+  `simbus` is started with no `--file` / `SIMBUS_YAML_PATH` (cwd file, else
+  the copy embedded in the binary).
+- `devices/community/` for contributor maps (PR). Official templates stay in
+  `devices/builtin/`.
+- Device YAML is the boot contract: `spec_version`, bundled `scenarios:`,
+  and protocol bindings (unimplemented protocols are valid syntax; boot refuses
+  them). Normative language: `docs/spec.md`. Session API: `docs/control.md`.
+  Process: `docs/runtime.md` (SIGINT/SIGTERM, drain then abort leftover).
+- `simbus ctl` — HTTP client of an already-running process (`GET /status`,
+  PATCH registers, faults, scenarios). Does not boot a device.
+- `--time-scale` / `SIMBUS_TIME_SCALE` — simulation seconds per wall second.
+  `dt = tick_interval × time_scale`. Default `1` is 1:1.
+- `simulation tick health` logs when `SIMBUS_TICK_HEALTH_LOG_INTERVAL` is > 0.
+- `AGENTS.md` (how to change this repo), `llms.txt` (documentation map), and
+  the Agent Skill `.agents/skills/simbus-device/` for writing device YAML
+  (`npx skills add obsidia-systems/simbus@simbus-device`).
+- Pause/resume: `PATCH /simulation` `{"running": false}` (tick and scenario
+  `at:` freeze; Modbus still serves the last bank; `/readyz` is 503).
+  `simbus ctl pause` / `resume`.
+- `POST /scenarios` installs a session copy (JSON, same schema as the YAML).
+  `DELETE /scenarios/{id}` drops it. Bundled ids return 409.
+  `simbus ctl install` / `uninstall`.
+- Tick behaviors `square`, `triangle`, `uniform`, and `cycle` (YAML kinds;
+  formulas in `docs/simulation.md`). Same live bank as Modbus and OPC UA.
+  `cosine` / PID walk / UA `qv` stay deferred (`docs/debt.md`).
+- Device language **2**: canonical `points:` (`kind` analog/binary, ASHRAE
+  `class` input/value/output) with explicit protocol `export`. Language 1
+  register maps still load and are lifted to points. Session API `GET`/`PATCH
+  /points/{id}` and `GET /points/stream` (`simbus ctl points` / `set-point`).
+  OPC UA language 2 NodeIds are `ns=N;s={id}` under Input/Value/Output folders.
+  A language-2 document with no Modbus binding backs every point with a
+  private engine cell, so an OPC UA-only or BACnet-only map still has values.
+- BACnet/IP field plane: `protocol: bacnet-ip` serves the language-2 `export`
+  rows as Analog/Binary Input, Value, and Output objects on IANA **47808**
+  (`crates/bacnet`, `bacnet-server`). Who-Is/I-Am, ReadProperty and
+  WriteProperty on `Present_Value`; a write lands in the same bank as a
+  Modbus FC6 or an HTTP `PATCH /points/{id}`. `device_instance` and a
+  non-empty `export` are required; `--bacnet-port` / `SIMBUS_BACNET_PORT`
+  overrides the YAML port when the document binds BACnet. `/status` reports
+  `bacnet_port` (`null` without a binding) and `/readyz` waits for the
+  listener. Official builtin maps stay Modbus-only.
+- OPC UA field plane: `protocol: opcua` serves the same YAML map on IANA
+  **4840** (`crates/opcua`, async-opcua, None + Anonymous). Dual-bind with
+  Modbus TCP/TLS. Official builtin maps stay Modbus-only. `/status.opcua_port`
+  is `null` when the document has no UA binding. `cargo deny` allows MPL-2.0
+  (async-opcua) and ignores two unfixed transitive advisories in that stack.
+- Modbus Security: `protocol: modbus-tls` serves the same V1.1b3 PDU over TLS
+  (rustls) on IANA port **802**. Dual-bind with `modbus-tcp` is allowed.
+  `certfile`/`keyfile` required at boot; `cafile` optional (mTLS). Official
+  builtin maps stay cleartext TCP. Lab recipe: [README.md](README.md).
+- Simplified GitFlow (`CONTRIBUTING.md`): feature PRs to `develop`; `main` is
+  the last published tree. A `v*` tag on `main` publishes GHCR and native
+  binaries via `dist` (linux amd64/arm64, macOS aarch64, shell installer).
+
+### Changed
+
+- Compose services drop every capability except `NET_BIND_SERVICE`, run
+  UID 65532 on a read-only rootfs with `no-new-privileges`, `init`, a
+  128 MiB / 1 CPU / 64-pid ceiling, and json-file logs capped at 10 MiB × 3.
+- Docker image is ~25 MB instead of ~146 MB (~9 MB to pull instead of ~46 MB).
+  The binary is now a static musl build on `gcr.io/distroless/static-debian12`,
+  so the runtime stage drops Debian, `ca-certificates` and `curl`; the
+  `HEALTHCHECK` is `simbus ctl healthz` in exec form. That image has **no
+  shell** — `docker exec … sh` no longer works. The build also repacks the
+  Swagger UI zip without source maps and duplicate ES bundles, which
+  `utoipa-swagger-ui` would otherwise embed verbatim (~10 MB of `.rodata`);
+  `/docs` still serves the full UI offline.
+- `simbus ctl` defaults `--url` to the loopback `SIMBUS_API_PORT` rather than a
+  hardcoded `8000`, so an API port override still reaches the local process.
+  `SIMBUS_CTL_URL` still wins when set.
+- Every map under `devices/` is language 2 (`points:` + Modbus `export`).
+  The seven product templates were rewritten against the point sets their
+  industries actually publish, and the point ids, units, spaces, and data
+  types moved with them: UPS on the RFC 1628 UPS MIB object set (charge,
+  runtime, seconds on battery, output source, the `upsAlarm*` flags); power
+  meter on the Eastron SDM630 float32 input-register map (same zero-based
+  addresses, so an existing SDM630 tag list reads it); PDU on the Raritan
+  PX / Server Technology Xerus shape (inlet float32 metering, per-outlet
+  current, one writable relay coil per outlet, overcurrent protector);
+  CRAC on the Liebert iCOM point list (return/supply air, writable
+  temperature / humidity / dew-point setpoints, capacity and fan percent,
+  filter and airflow alarms); leak detector on locating-panel semantics
+  (per-zone leak with distance in metres, cable-break supervision);
+  door contact on supervised access monitoring (position, ajar, forced
+  entry, request to exit, tamper, loop fault). T&H gained dew point and a
+  sensor-fault flag but kept `temperature` and `humidity` at holding 0–1,
+  scale 10. `devices/community/papouch-th2e.yaml` is language 2 with the
+  same wire layout as before (input 0/1/4/5/8/9, coils 0–3).
+  Reading a language-1 document is unchanged.
+- `GET /config` reports the declared field plane in `bindings`: protocol,
+  port, `unit_id` / `endianness` (Modbus TCP), `device_instance` (BACnet),
+  export row count, and whether this runtime implements the protocol. It is
+  the document view — CLI and env port overrides show in `/status`, not here.
+- The materialized register bank is ordered by address instead of by point
+  id, so `simbus check` and `GET /config.registers` read like a register map.
+- Boot is file-only: `--file` / `SIMBUS_YAML_PATH`, else the default template.
+  There is no `--type` / `SIMBUS_DEVICE_TYPE` / `--devices-dir`. Official maps
+  are templates you point `--file` at. The YAML field `type:` remains identity
+  inside the document. The default template is also embedded so `simbus` with
+  no args works without a checkout.
+- Papouch TH2E lives at `devices/community/papouch-th2e.yaml`.
+- Bundled scenarios live in the device YAML. The Rust runtime no longer reads
+  `SIMBUS_SCENARIO_DIR` / a global `scenarios/` catalog.
+- Engine tick contract (`docs/simulation.md`): drift is `rate × dt` (per
+  simulation second, not per tick). `uint16` encode clamps instead of wrapping.
+  Trigger `eq` matches within half a raw LSB. Freeze latches the cell at inject.
+  `POST /simulation/reset` restores boot `RegState` and the RNG stream (same seeded trace). Seed
+  mix includes `identity`. Wall clock and simulation time stay 1:1 unless
+  `--time-scale` is set; there is no second clock in the engine.
+- Control plane (`docs/control.md`, crate `control` not `api`): session HTTP
+  vs Modbus field plane. `GET /registers/stream` follows engine ticks and
+  session writes. SSE is not covered by the 30 s request timeout. Faults
+  validate register/coil names (404) and spike `value` (422). OpenAPI lists
+  the full session route set.
+- Modbus field plane (`docs/modbus.md`): V1.1b3 / V1.0b. Reads and writes
+  exception 02 if the range is not fully implemented. Each PDU address is a
+  u16 (a one-word write into a `float32` pair splices that word). Native TCP
+  does not filter on MBAP unit id (`0xFF` / `0` are valid per V1.0b).
+  `modbus-tls` wraps that PDU in TLS (IANA 802); `/status.modbus_tls_port`
+  is `null` when the document has no TLS binding. `/readyz` waits for every
+  requested field listener. OPC UA on IANA 4840 is served when the YAML lists
+  `protocol: opcua` (`/status.opcua_port`). Architecture and README diagrams
+  show tick, Modbus, OPC UA, and HTTP on one bank (boot sequence, shutdown,
+  Docker lab).
+- Documentation map (`docs/README.md`) and architecture explanation
+  (`docs/architecture.md`) with GitHub-safe Mermaid (flowchart, sequence,
+  state). README is the front door; contracts stay in `docs/`. Crate tests
+  and the device-map table live in those pages; there are no crate or
+  `devices/` README files.
+- The normative pages now plot the data they specify, not only the call
+  graph. `docs/simulation.md` §5 carries one chart per behavior, evaluated
+  from the formula in that section with the parameters a shipped map uses,
+  plus a fault window that shows `spike` / `freeze` / `dropout` /
+  `noise_amplify` expiring on their TTL, and two devices booted from one
+  `--seed` drawing different `phase_s`. `docs/modbus.md` draws the MBAP+PDU
+  request, response, and exception frames and the `float32` word order for
+  each `endianness`; `docs/bacnet.md` draws Who-Is and a ReadProperty APDU.
+  `docs/spec.md` §2 states the document cardinality as an ER diagram and §7
+  puts `power-outage` on the simulation clock; `docs/scenarios.md` does the
+  same for `heat-wave` and adds the runner state machine.
+  `docs/control.md` §3 opens with the whole route surface, and
+  `CONTRIBUTING.md` draws the branch model. Charts use the `-beta` diagram
+  aliases (`xychart-beta`, `packet-beta`), which parse on both Mermaid 10
+  and 11, and every chart keeps the normative table or formula next to it.
+- Tracing events from the Rust process: `simbus started` / `simbus stopping`,
+  `api listening`, `modbus server listening`, `modbus tls listening`,
+  `fault injected` / `expired` /
+  `cleared`, `simulation reset`, `simulation paused` / `resumed`,
+  `simulation base changed`, `alarm activated` /
+  `cleared`, `discrete changed`. There is no `register changed` event.
+  `simulation tick health` is emitted when `SIMBUS_TICK_HEALTH_LOG_INTERVAL` > 0.
+- SIGINT/SIGTERM: stop accepting, wait up to `SIMBUS_SHUTDOWN_TIMEOUT` (default
+  5 s), then abort leftover tasks (including SSE). Timeout `0` aborts immediately.
+- CI: `cargo deny check` in the PR gate; GHCR publish requires the `v*` tag
+  commit to be an ancestor of `origin/main`. Native binaries and a shell
+  installer ship from `.github/workflows/release.yml` (`dist` 0.32). The
+  binary Cargo package is `simbus` (`-p simbus`); the crate directory remains
+  `crates/runtime`. Feature PRs and the `develop` → `main` cut run the **CI**
+  workflow only. Release (`dist`) and GHCR publish on a `v*` tag on `main`.
+
+### Fixed
+
+- Release workflow `dist plan` loads `github-build-setup` relative to
+  `.github/workflows/` (one `../` is `.github/`, not the repo root). The
+  gate file lives at `.github/workflows/ci/dist-assert-main.yml`.
+  `.github/workflows/release.yml` is regenerated with `dist generate`
+  (0.32.0); `on.pull_request` is stripped so Release and GHCR run only on
+  a version tag (`allow-dirty = ["ci"]`).
+
+### Removed
+
+- Python 0.2.x tree (`simbus/`, `tests/`, `pyproject.toml`, `uv.lock`).
+- Global `scenarios/` catalog. Recipes now live under `scenarios:` in each
+  device YAML.
+- CI job `python-legacy` (`uv` / ruff / mypy / pytest). CI is Rust-only:
+  fmt, clippy, `cargo test --workspace --locked`, `cargo deny check`,
+  `simbus check` on `devices/`.
+
+---
+
+## [0.2.0] — 2026-04-28
+
+Python runtime (FastAPI + pymodbus). Superseded by the Rust workspace in
+Unreleased.
+
 ### Added
 
 - Functional logging for simulation/runtime events:

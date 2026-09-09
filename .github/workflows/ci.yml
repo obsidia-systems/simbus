@@ -6,32 +6,47 @@ on:
   pull_request:
     branches: [main, develop]
 
-jobs:
-  lint-and-test:
-    name: Lint & Test
-    runs-on: ubuntu-latest
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
+jobs:
+  rust:
+    name: Rust
+    runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Set up uv
-        uses: astral-sh/setup-uv@v5
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
         with:
-          version: "latest"
-          python-version: "3.14"
+          components: rustfmt, clippy
 
-      - name: Install dependencies
-        run: uv sync --frozen
+      - name: Cache
+        uses: Swatinem/rust-cache@v2
 
-      - name: Run ruff check
-        run: uv run ruff check simbus tests
+      - name: Format
+        run: cargo fmt --all -- --check
 
-      - name: Run ruff format check
-        run: uv run ruff format --check simbus tests
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
 
-      - name: Run mypy
-        run: uv run mypy simbus
+      - name: Test
+        run: cargo test --workspace --locked
 
-      - name: Run tests with coverage
-        run: uv run pytest -v --cov=simbus --cov-report=term-missing --cov-fail-under=95
+      - name: Deny
+        uses: EmbarkStudios/cargo-deny-action@v2
+
+      - name: Validate device YAML
+        run: |
+          set -euo pipefail
+          cargo build -p simbus --locked --quiet
+          fail=0
+          while IFS= read -r -d '' f; do
+            echo "==> $f"
+            if ! ./target/debug/simbus check "$f"; then
+              fail=1
+            fi
+          done < <(find devices -name '*.yaml' -print0 | sort -z)
+          exit "$fail"

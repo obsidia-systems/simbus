@@ -1,0 +1,36 @@
+[package]
+name = "simbus"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+homepage.workspace = true
+description = "Industrial field device simulator — one process, one device"
+publish = false
+
+[[bin]]
+name = "simbus"
+path = "src/main.rs"
+
+[package.metadata.dist]
+dist = true
+
+[lints]
+workspace = true
+
+[dependencies]
+anyhow = { workspace = true }
+clap = { workspace = true }
+control = { workspace = true }
+engine = { workspace = true }
+modbus = { workspace = true }
+opcua = { workspace = true }
+bacnet = { workspace = true }
+reqwest = { workspace = true }
+serde_json = { workspace = true }
+spec = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }

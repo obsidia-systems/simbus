@@ -2,26 +2,13 @@
 .git
 .gitignore
 
-# Python caches
-__pycache__/
-*.py[cod]
-*.pyo
-.mypy_cache/
-.ruff_cache/
-.pytest_cache/
-
-# Virtual environment
-.venv/
-
-# Test artifacts
-tests/
-.coverage
-htmlcov/
-
 # Dev tooling
 .env
 *.env.*
 !.env.example
+target/
+.github/
+.agents/
 
 # Editor / OS
 .vscode/
@@ -29,7 +16,5 @@ htmlcov/
 *.swp
 .DS_Store
 
-# Docs and examples
+# Docs (not needed in the image)
 docs/
-devices/
-example.py

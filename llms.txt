@@ -1,0 +1,38 @@
+# simbus
+
+> Industrial field-device simulator: one process, one YAML, Modbus TCP (and TLS on 802), OPC UA on 4840, BACnet/IP on 47808, plus HTTP control.
+
+This file is a **documentation map** for agents (same role as `/llms.txt` on a docs site). For how to **change this codebase**, read [AGENTS.md](AGENTS.md). Branch model and PR target (`develop`): [CONTRIBUTING.md](CONTRIBUTING.md). For **authoring a device YAML**, use the project skill [simbus-device](.agents/skills/simbus-device/SKILL.md) (`npx skills add obsidia-systems/simbus@simbus-device`).
+
+Human front door: [README.md](README.md). Contracts live in `docs/` and win over Rust types when they disagree.
+
+## Contracts
+
+- [docs/spec.md](docs/spec.md): Device YAML language (boot contract; language 2 current, 1 still loads). Start here for new fields or protocols.
+- [docs/runtime.md](docs/runtime.md): Binary, boot, CLI/env, signals, Docker, time scale, drain.
+- [docs/modbus.md](docs/modbus.md): Field plane — Modbus TCP PDU (V1.1b3 / V1.0b) and TLS wrap (IANA `mbaps` 802).
+- [docs/opcua.md](docs/opcua.md): Field plane — OPC UA (IANA 4840), YAML map as variables. None + Anonymous.
+- [docs/bacnet.md](docs/bacnet.md): Field plane — BACnet/IP (IANA 47808), `export` rows as AI/AV/BI/BV objects. Who-Is, ReadProperty, WriteProperty.
+- [docs/control.md](docs/control.md): Session HTTP (not the field protocol). OpenAPI at `GET /docs` on a running process.
+- [docs/simulation.md](docs/simulation.md): Tick, `state.base`, behaviors, faults, encode.
+- [docs/scenarios.md](docs/scenarios.md): How to run scenarios bundled in the device YAML (and session install).
+- [docs/architecture.md](docs/architecture.md): Process shape, crates, repo layout.
+- [docs/debt.md](docs/debt.md): Specified as not this version (extra protocols).
+- [docs/README.md](docs/README.md): Diátaxis index.
+
+## Device maps
+
+Where files go (builtin vs community): [docs/spec.md](docs/spec.md) (maps table).
+Every shipped map is language 2, and each product template follows the point
+set its industry publishes (UPS on RFC 1628, power meter on the Eastron SDM630
+map, PDU on Raritan/ServerTech, CRAC on Liebert iCOM, leak on locating panels).
+- [devices/builtin/](devices/builtin/): `default.yaml` plus product-shaped templates (T&H, UPS, PDU, CRAC, power meter, leak, door).
+- [devices/community/](devices/community/): Contributor maps (example: Papouch TH2E).
+
+Validate any map with `simbus check <file>` (or `cargo run -p simbus -- check <file>`).
+
+## Optional
+
+- [index.html](index.html): Marketing landing, not a contract.
+- [CONTRIBUTING.md](CONTRIBUTING.md): GitFlow (feature → develop → main → tag). GitHub default branch should be `develop`.
+- [CHANGELOG.md](CHANGELOG.md): Release notes (`## [Unreleased]` during development). How to cut a tag, bump versions, and publish: [AGENTS.md](AGENTS.md) § Release.

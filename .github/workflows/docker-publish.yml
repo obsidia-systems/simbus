@@ -8,11 +8,11 @@
 #   linux/amd64 → ubuntu-24.04       (standard GitHub-hosted x86-64)
 #   linux/arm64 → ubuntu-24.04-arm   (GitHub-hosted Graviton / Apple M equivalent)
 #
-# Triggers:
-#   tag v* from main  → :1.2.3, :1.2, :latest, :sha-<short>
-#   pull request      → build-only validation, no push
+# Trigger: tag v* whose commit is an ancestor of origin/main.
+# PRs and branch pushes do not run this workflow (CI is the PR gate).
 #
-# Tags pushed from any branch other than main are rejected (job-level condition).
+# Tag commits that are not ancestors of origin/main fail the "tag is on main"
+# step (do not use github.event.base_ref; it is empty on tag pushes).
 # latest always points to the most recently published version tag.
 
 name: Build and publish Docker image
@@ -20,8 +20,6 @@ name: Build and publish Docker image
 on:
   push:
     tags: ["v*"]
-  pull_request:
-    branches: [main]
 
 env:
   REGISTRY: ghcr.io
@@ -35,12 +33,6 @@ jobs:
     permissions:
       contents: read
       packages: write
-
-    # On tag pushes: only proceed if the tag was created from main.
-    # On pull requests: always build (validation only, no push).
-    if: >-
-      github.event_name == 'pull_request' ||
-      github.event.base_ref == 'refs/heads/main'
 
     strategy:
       fail-fast: false
@@ -56,44 +48,43 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Tag must be on main
+        run: |
+          set -euo pipefail
+          git fetch origin main
+          git merge-base --is-ancestor "$GITHUB_SHA" origin/main
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
       - name: Log in to GHCR
-        if: github.event_name != 'pull_request'
         uses: docker/login-action@v3
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # Build and push by digest only (no tag yet — the merge job handles tags).
-      # On pull requests: build and validate only, no push.
+      # Build and push by digest only (the merge job applies tags).
       - name: Build and push by digest
         id: build
         uses: docker/build-push-action@v6
         with:
           context: .
           platforms: ${{ matrix.platform }}
-          outputs: >-
-            ${{ github.event_name != 'pull_request'
-              && format('type=image,name={0}/{1},push-by-digest=true,name-canonical=true,push=true', env.REGISTRY, env.IMAGE_NAME)
-              || 'type=cacheonly' }}
-          # Cache scoped per arch so the two matrix jobs don't interfere.
+          outputs: type=image,name=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }},push-by-digest=true,name-canonical=true,push=true
           cache-from: type=gha,scope=build-${{ matrix.arch }}
           cache-to: type=gha,mode=max,scope=build-${{ matrix.arch }}
 
-      # Pass the content-addressable digest to the merge job via artifact.
       - name: Export digest
-        if: github.event_name != 'pull_request'
         run: |
           mkdir -p /tmp/digests
           digest="${{ steps.build.outputs.digest }}"
           touch "/tmp/digests/${digest#sha256:}"
 
       - name: Upload digest artifact
-        if: github.event_name != 'pull_request'
         uses: actions/upload-artifact@v4
         with:
           name: digest-${{ matrix.arch }}
@@ -106,9 +97,6 @@ jobs:
     name: Merge manifests and push tags
     runs-on: ubuntu-latest
     needs: build
-    if: >-
-      github.event_name != 'pull_request' &&
-      github.event.base_ref == 'refs/heads/main'
     permissions:
       contents: read
       packages: write
@@ -147,7 +135,6 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # Combine both arch digests into a single manifest list with all tags.
       - name: Create and push manifest list
         working-directory: /tmp/digests
         run: |
@@ -155,7 +142,6 @@ jobs:
             $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON") \
             $(printf '${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@sha256:%s ' *)
 
-      # Confirm both architectures appear in the final manifest.
       - name: Inspect final manifest
         run: |
           docker buildx imagetools inspect \

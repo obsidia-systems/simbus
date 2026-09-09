@@ -1,0 +1,294 @@
+# Generic temperature / humidity transmitter.
+#
+# Shaped like an industrial room transmitter (Vaisala HMM170, E+E EE071,
+# Sentera RSTH, Papouch TH2E): relative humidity and temperature measured,
+# dew point calculated, plus out-of-range alert flags and a sensor
+# supervision flag. Those products publish scaled 16-bit integers next to a
+# float32 block; this map uses the scaled-integer form (raw = value x 10).
+#
+# Nominal: indoor comfort range, degC. A real transmitter derives dew point
+# from temperature and humidity; the engine has no formula behavior, so here
+# it is an independent channel.
+
+name: "Generic T&H Sensor"
+spec_version: 2
+version: "1.1"
+type: tnh_sensor
+description: >
+  Temperature and humidity transmitter for hot/cold aisle monitoring.
+  Temperature, relative humidity, and dew point with high/low alert flags.
+
+identity:
+  vendor: Obsidia
+  product: Generic T&H Sensor
+  revision: "1.1"
+
+points:
+  - id: temperature
+    kind: analog
+    class: input
+    description: "Ambient temperature"
+    unit: "°C"
+    default: 22.5
+    simulation:
+      behavior: gaussian_noise
+      std_dev: 0.3
+      drift:
+        enabled: true
+        rate: 0.01          # °C per simulation second
+        bounds: [18.0, 35.0]
+
+  - id: humidity
+    kind: analog
+    class: input
+    description: "Relative humidity"
+    unit: "%RH"
+    default: 45.0
+    simulation:
+      behavior: sinusoidal
+      period_hours: 12
+      amplitude: 5.0
+
+  - id: dew_point
+    kind: analog
+    class: input
+    description: "Dew point temperature (calculated on a real transmitter)"
+    unit: "°C"
+    default: 9.8
+    simulation:
+      behavior: sinusoidal
+      period_hours: 12
+      amplitude: 1.5
+
+  - id: high_temp_alarm
+    kind: binary
+    class: input
+    description: "Temperature above the upper alert limit"
+    default: false
+    trigger:
+      source: temperature
+      condition: gt
+      threshold: 30.0
+
+  - id: low_humidity_alarm
+    kind: binary
+    class: input
+    description: "Humidity below the lower alert limit (static discharge risk)"
+    default: false
+    trigger:
+      source: humidity
+      condition: lt
+      threshold: 30.0
+
+  - id: high_humidity_alarm
+    kind: binary
+    class: input
+    description: "Humidity above the upper alert limit (condensation risk)"
+    default: false
+    trigger:
+      source: humidity
+      condition: gt
+      threshold: 80.0
+
+  - id: sensor_fault
+    kind: binary
+    class: input
+    description: "Sensor supervision: measurement invalid or probe lost"
+    default: false
+
+bindings:
+  - protocol: modbus-tcp
+    port: 502
+    unit_id: 1
+    endianness: big
+    export:
+      temperature:
+        space: holding
+        address: 0
+        scale: 10
+        data_type: uint16
+      humidity:
+        space: holding
+        address: 1
+        scale: 10
+        data_type: uint16
+      dew_point:
+        space: holding
+        address: 2
+        scale: 10
+        data_type: int16      # dew point goes below 0 °C in dry winter air
+      high_temp_alarm:
+        space: coil
+        address: 0
+      low_humidity_alarm:
+        space: coil
+        address: 1
+      high_humidity_alarm:
+        space: coil
+        address: 2
+      sensor_fault:
+        space: discrete
+        address: 0
+
+alarms:
+  - name: "High Temperature"
+    severity: warning
+    trigger: high_temp_alarm
+  - name: "Low Humidity"
+    severity: warning
+    trigger: low_humidity_alarm
+  - name: "High Humidity"
+    severity: warning
+    trigger: high_humidity_alarm
+  - name: "Sensor Fault"
+    severity: critical
+    trigger: sensor_fault
+
+scenarios:
+  - id: heat-wave
+    name: Heat Wave Event
+    description: >
+      Gradual temperature rise in a server room that crosses the high-temp
+      alert limit, then a spike. Exercises SCADA alarm pipelines and
+      notification chains.
+    steps:
+      - at: 0
+        action: set_point
+        point: temperature
+        value: 22.0
+      - at: 2
+        action: set_point
+        point: temperature
+        value: 25.0
+      - at: 5
+        action: set_point
+        point: temperature
+        value: 30.0
+      - at: 10
+        action: set_point
+        point: temperature
+        value: 35.0
+      - at: 12
+        action: inject_fault
+        fault_type: spike
+        point: temperature
+        value: 42.0
+        duration_s: 30
+      - at: 15
+        action: set_tick_interval
+        tick_interval: 0.5
+      - at: 45
+        action: set_tick_interval
+        tick_interval: 1.0
+
+  - id: thermal-runaway
+    name: Thermal Runaway
+    description: >
+      Temperature climbs through the alert limit, a spike hits, then the room
+      recovers. Tests alarm detection, escalation, and auto-clear.
+    steps:
+      - at: 0
+        action: set_point
+        point: temperature
+        value: 22.0
+      - at: 10
+        action: set_point
+        point: temperature
+        value: 28.0
+      - at: 20
+        action: set_point
+        point: temperature
+        value: 32.0
+      - at: 30
+        action: inject_fault
+        fault_type: spike
+        point: temperature
+        value: 45.0
+        duration_s: 60
+      - at: 40
+        action: set_point
+        point: temperature
+        value: 35.0
+      - at: 120
+        action: set_point
+        point: temperature
+        value: 22.0
+
+  - id: fast-alarm-test
+    name: Fast Alarm Test
+    description: >
+      Accelerated thermal event for CI pipelines. Completes in ~3 seconds.
+    steps:
+      - at: 0
+        action: set_tick_interval
+        tick_interval: 0.1
+      - at: 0.5
+        action: set_point
+        point: temperature
+        value: 35.0
+      - at: 2.0
+        action: set_point
+        point: temperature
+        value: 22.0
+      - at: 2.5
+        action: set_tick_interval
+        tick_interval: 1.0
+
+  - id: stuck-sensor
+    name: Stuck Sensor
+    description: >
+      Temperature freezes while humidity keeps moving, then the transmitter
+      raises its supervision flag. Tests stale-data and sensor-fault handling.
+    steps:
+      - at: 0
+        action: set_point
+        point: temperature
+        value: 22.0
+      - at: 5
+        action: inject_fault
+        fault_type: freeze
+        point: temperature
+        duration_s: 60
+      - at: 10
+        action: set_point
+        point: humidity
+        value: 82.0
+      - at: 20
+        action: set_point
+        point: sensor_fault
+        value: true
+      - at: 70
+        action: set_point
+        point: sensor_fault
+        value: false
+
+  - id: condensation-risk
+    name: Condensation Risk
+    description: >
+      Humidity climbs toward saturation while the dew point closes on room
+      temperature. Tests the high-humidity alert and dew-point monitoring.
+    steps:
+      - at: 0
+        action: set_point
+        point: humidity
+        value: 60.0
+      - at: 10
+        action: set_point
+        point: humidity
+        value: 78.0
+      - at: 20
+        action: set_point
+        point: humidity
+        value: 88.0
+      - at: 20
+        action: set_point
+        point: dew_point
+        value: 20.5
+      - at: 60
+        action: set_point
+        point: humidity
+        value: 45.0
+      - at: 60
+        action: set_point
+        point: dew_point
+        value: 9.8
