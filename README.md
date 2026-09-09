@@ -405,6 +405,17 @@ Normative route list: [docs/control.md](docs/control.md). Interactive docs at
 | `PATCH` | `/registers/discrete/{address}` | Discrete input — set boolean state |
 | `GET` | `/registers/stream` | **SSE** — current snapshot on subscribe, then each tick and each session write |
 
+### Points
+
+Canonical ids (language 2, and language 1 after lift). Prefer these over raw addresses.
+
+| Method | Endpoint | Description |
+| --- | --- | --- |
+| `GET` | `/points` | All points with live engineering / boolean values |
+| `GET` | `/points/{id}` | One point |
+| `PATCH` | `/points/{id}` | `{"value": 27.0}` or `{"value": true}` |
+| `GET` | `/points/stream` | **SSE** — same cadence as `/registers/stream` |
+
 Numeric PATCH endpoints accept either a **raw** integer or a **real-world** float — the API applies the register's scale automatically:
 
 ```bash
@@ -547,7 +558,8 @@ Browse `Objects → Holding` (engineering values, e.g. temperature ≈ 22.5).
 
 ## Device YAML Schema
 
-The device YAML is the **boot contract**. Language version, fields, validation,
+The device YAML is the **boot contract**. Language **2** (`points:` + export)
+is current; language **1** (`registers:`) still loads. Fields, validation,
 bindings, and bundled scenarios are defined in **[docs/spec.md](docs/spec.md)**.
 Session mutations (PATCH, faults, run scenario) are **[docs/control.md](docs/control.md)**.
 

@@ -169,6 +169,7 @@ fn field_listeners(spec: &spec::DeviceSpec, args: &RunArgs) -> Result<FieldListe
             BindingSpec::ModbusTcp {
                 port: bind_port,
                 unit_id: bind_unit,
+                ..
             } => {
                 if let Some(u) = bind_unit {
                     unit_id = u;
@@ -180,6 +181,7 @@ fn field_listeners(spec: &spec::DeviceSpec, args: &RunArgs) -> Result<FieldListe
                 certfile,
                 keyfile,
                 cafile,
+                ..
             } => {
                 let certfile = args
                     .modbus_cert
@@ -197,7 +199,7 @@ fn field_listeners(spec: &spec::DeviceSpec, args: &RunArgs) -> Result<FieldListe
                     cafile,
                 });
             }
-            BindingSpec::Opcua { port } => {
+            BindingSpec::Opcua { port, .. } => {
                 opcua = Some(args.opcua_port.unwrap_or(port));
             }
             _ => {}

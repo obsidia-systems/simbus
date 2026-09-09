@@ -31,6 +31,17 @@ enum CtlCommand {
     Metrics,
     /// GET /registers
     Registers,
+    /// GET /points
+    Points,
+    /// GET /points/{id}
+    Point { id: String },
+    /// PATCH /points/{id}
+    SetPoint {
+        id: String,
+        /// Analog number or `true`/`false`
+        #[arg(long)]
+        value: String,
+    },
     /// PATCH a holding or input register
     Set {
         address: u16,
@@ -99,6 +110,19 @@ pub async fn run(args: CtlArgs) -> Result<()> {
         CtlCommand::Readyz => get(base, "/readyz", key).await,
         CtlCommand::Metrics => get(base, "/metrics", key).await,
         CtlCommand::Registers => get(base, "/registers", key).await,
+        CtlCommand::Points => get(base, "/points", key).await,
+        CtlCommand::Point { id } => get(base, &format!("/points/{id}"), key).await,
+        CtlCommand::SetPoint { id, value } => {
+            let body = point_body(&value)?;
+            send(
+                Method::PATCH,
+                base,
+                &format!("/points/{id}"),
+                key,
+                Some(body),
+            )
+            .await
+        }
         CtlCommand::Set {
             address,
             real_value,
@@ -215,6 +239,19 @@ fn register_body(real_value: Option<f64>, value: Option<u16>) -> Result<Value> {
         (None, None) => bail!("provide --real-value or --value"),
         (Some(_), Some(_)) => bail!("--real-value and --value are mutually exclusive"),
     }
+}
+
+fn point_body(value: &str) -> Result<Value> {
+    if value.eq_ignore_ascii_case("true") {
+        return Ok(json!({ "value": true }));
+    }
+    if value.eq_ignore_ascii_case("false") {
+        return Ok(json!({ "value": false }));
+    }
+    let number: f64 = value.parse().with_context(|| {
+        format!("set-point --value must be a number or true/false (got {value})")
+    })?;
+    Ok(json!({ "value": number }))
 }
 
 fn load_install_body(path: &std::path::Path) -> Result<Value> {

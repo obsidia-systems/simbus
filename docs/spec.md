@@ -1,12 +1,13 @@
 # simbus Device Spec
 
-**Status:** normative for language version **1**  
+**Status:** normative for language version **2** (current). Language **1** still loads.  
 **Audience:** device authors, contributors, and anyone implementing a simbus runtime  
 **Related:** [architecture](architecture.md) · [simulation semantics](simulation.md) · [control plane](control.md) · [runtime process](runtime.md) · [Modbus field plane](modbus.md)
 
 This document is the **syntax of a simbus device**. A device YAML file is the
-complete boot contract: identity, protocol bindings, register map, behaviors,
-alarms, and bundled scenarios. The Rust types in `crates/spec` are the machine
+complete boot contract: identity, protocol bindings, canonical points (or a
+language-1 register map that is lifted to points), behaviors, alarms, and
+bundled scenarios. The Rust types in `crates/spec` are the machine
 readable form of the same language. When they disagree, this document and the
 validator (`simbus check`) win — change them together.
 
@@ -36,8 +37,9 @@ Two layers, one source of truth:
 | **Boot contract** | This YAML | The file. Community PR. `simbus check`. |
 | **Session** | Current values, faults, tick, pause, scenario playback, session-installed scenarios | Process memory. Dies with the process. |
 
-The register map is **immutable** in this version. Changing `temperature` is a
-PATCH. Creating a register that was not in the YAML is out of scope.
+The register map (language 1) and the point list (language 2) are **immutable**
+in this version. Changing `temperature` is a PATCH. Creating a point that was
+not in the YAML is out of scope.
 
 ```mermaid
 flowchart LR
@@ -61,38 +63,46 @@ flowchart LR
 One file describes **one device**. One process loads one file.
 
 ```yaml
-name: "Generic T&H Sensor"
-spec_version: 1
+name: "Example Device"
+spec_version: 2
 version: "1.0"
-type: tnh_sensor
+type: example
 description: >
-  Generic temperature and humidity sensor.
+  Canonical points plus explicit protocol export.
 
 identity:
   vendor: Obsidia
-  product: Generic T&H
+  product: Example Device
   revision: "1.0"
 
-modbus:
-  default_port: 502
-  unit_id: 1
-  endianness: big
+points:
+  - id: analog_a
+    kind: analog
+    class: value
+    unit: units
+    default: 50.0
+    simulation:
+      behavior: constant
 
-# bindings:            # optional; empty infers Modbus TCP from `modbus`
-#   - protocol: modbus-tcp
-#     port: 502
-#     unit_id: 1
-
-registers:
-  holding: []
-  input: []
-  coils: []
-  discrete: []
+bindings:
+  - protocol: modbus-tcp
+    port: 502
+    unit_id: 1
+    endianness: big
+    export:
+      analog_a:
+        space: holding
+        address: 0
+        scale: 10
+        data_type: uint16
 
 alarms: []
-
 scenarios: []
 ```
+
+Language **1** documents use top-level `modbus:` and `registers:` instead of
+`points:` / `export`. The loader lifts them to the same in-memory points.
+Do not mix `points:` and `registers:` in one file.
 
 `--file` / `SIMBUS_YAML_PATH` loads an explicit path. With no path, the runtime
 boots `devices/builtin/default.yaml` (or the copy embedded in the binary).
@@ -126,24 +136,32 @@ file; CI already runs `simbus check` on `devices/**/*.yaml`. Agent playbook:
 | Field | Type | Required | Default | Meaning |
 | --- | --- | --- | --- | --- |
 | `name` | string | yes | — | Display name (`GET /status`). |
-| `spec_version` | integer | no | `1` | **Language** version. MUST be `1`. Distinct from `version`. |
+| `spec_version` | integer | no | `1` | **Language** version. Current language is **2**. Omitted or `1` still loads (register map). Distinct from `version`. |
 | `version` | string | yes | — | Map / product version (`"1.0"`, `"1.2"`). |
 | `type` | string | yes | — | Device class identity (`example`, `tnh_sensor`, `ups`). Not a CLI flag. |
 | `description` | string | no | `""` | Human text. |
 | `identity` | object | no | empty | Vendor / product / revision (reserved for FC43, OPC UA BuildInfo). |
-| `modbus` | object | yes | — | Default Modbus listen settings (v1 files). |
-| `registers` | object | no | empty map | Holding, input, coils, discrete. |
-| `alarms` | list | no | `[]` | Metadata bound to coil/discrete names. |
-| `bindings` | list | no | `[]` | Protocol listeners. Empty infers Modbus TCP from `modbus`. |
+| `modbus` | object | language 1 | — | Default Modbus listen settings. Language 2 takes port / unit / endianness from the Modbus binding. |
+| `points` | list | language 2 | — | Canonical analog/binary points. Required and non-empty when `spec_version` is 2. |
+| `registers` | object | language 1 | empty map | Holding, input, coils, discrete. Lifted to points at load. |
+| `alarms` | list | no | `[]` | Metadata bound to binary point / coil names. |
+| `bindings` | list | language 2 yes | `[]` | Protocol listeners. Language 1: empty infers Modbus TCP. Language 2: empty means HTTP-only (no infer). |
 | `scenarios` | list | no | `[]` | Bundled timed sequences. Loaded at boot; started via API. |
 
 ### 3.1 `spec_version`
 
-`spec_version` versions **this language**, not a particular UPS map. A runtime
-that understands only version 1 MUST reject any other value.
+`spec_version` versions **this language**, not a particular UPS map.
 
-When the language gains a breaking change, increment `SPEC_VERSION` in
-`crates/spec` and this document in the same change.
+| Value | Meaning |
+| --- | --- |
+| omitted or `1` | Language 1: `registers:` + optional `modbus:`. Lifted to points at load. |
+| `2` | Language 2: `points:` + explicit `export` on each served binding. |
+
+This runtime MUST reject any other integer. When the language gains a breaking
+change, increment `SPEC_VERSION` in `crates/spec` and this document in the
+same change.
+
+New official maps SHOULD use language 2. Community maps MAY stay on 1.
 
 ### 3.2 `identity`
 
@@ -174,12 +192,45 @@ Endianness applies to multi-word values (`uint32`, `float32`):
 | `big_swap` | BADC |
 | `little_swap` | CDAB |
 
+### 3.4 Canonical points (language 2)
+
+The engine stores **engineering `f64`** (analog) and **`bool`** (binary).
+Integer encoding and `scale` exist only on Modbus export. There is no decimal
+crate.
+
+| Field | Type | Required | Constraint |
+| --- | --- | --- | --- |
+| `id` | string | yes | Unique in the document (`analog_a`, `temperature`). |
+| `kind` | enum | yes | `analog` · `binary` |
+| `class` | enum | yes | `input` · `value` · `output` (ASHRAE I/V/O: who owns the live value) |
+| `description` | string | no | |
+| `unit` | string | no | Analog engineering unit. Ignored for binary. |
+| `default` | number or bool | yes | Number if analog, boolean if binary. |
+| `simulation` | object | no | Analog only. Same behaviors as language 1. |
+| `trigger` | object | no | Binary only. Source MUST be an analog **point id**. |
+
+`class` is **not** a Modbus table. A measured analog MAY export to `holding`.
+`input` means the tick (or a trigger) owns the value; `value` / `output` are
+writable from the field plane when that protocol allows writes.
+
+**Trigger** (language 2):
+
+| Field | Type | Values |
+| --- | --- | --- |
+| `source` | string | Analog point id. YAML alias: `source_register` |
+| `condition` | enum | `gt` · `lt` · `eq` · `gte` · `lte` |
+| `threshold` | float | Engineering units |
+
+Alarms still name a **binary** point id (the materialized coil/discrete name
+is the same string).
+
 ---
 
 ## 4. Protocol bindings
 
-Each binding is tagged with `protocol`. An empty `bindings` list **MUST** be
-treated as:
+Each binding is tagged with `protocol`.
+
+Language **1**: an empty `bindings` list **MUST** be treated as:
 
 ```yaml
 bindings:
@@ -188,7 +239,12 @@ bindings:
     unit_id: <modbus.unit_id>
 ```
 
-### 4.1 Implementation status (language version 1)
+Language **2**: an empty `bindings` list MUST NOT infer Modbus. The process
+MAY boot HTTP-only. Every served `modbus-tcp`, `modbus-tls`, `opcua`, and
+`bacnet-ip` binding MUST include a **non-empty `export`** map. Omitting
+`export` does **not** publish every point.
+
+### 4.1 Implementation status (language version 2)
 
 | `protocol` | Syntax | Served by this runtime |
 | --- | --- | --- |
@@ -212,8 +268,22 @@ To add a protocol: extend this section and `BindingSpec` first, keep
 
 | Field | Type | Default |
 | --- | --- | --- |
-| `port` | uint16? | `modbus.default_port` when inferred |
-| `unit_id` | uint8? | `modbus.unit_id` when inferred |
+| `port` | uint16? | language 1: `modbus.default_port` when inferred |
+| `unit_id` | uint8? | language 1: `modbus.unit_id` when inferred |
+| `endianness` | enum | `big` (language 2; language 1 uses top-level `modbus`) |
+| `export` | map | language 2: required, non-empty. Keys are point ids. |
+
+Each Modbus export row:
+
+| Field | Type | Notes |
+| --- | --- | --- |
+| `space` | enum | `holding` · `input` · `coil` · `discrete` |
+| `address` | uint16 | Zero-based. Analog `float32`/`uint32` occupy two words. |
+| `scale` | uint32 | Analog only; default `1`; MUST be ≥ 1. `raw ≈ eng × scale`. |
+| `data_type` | enum | Analog only; default `uint16`. Same set as language-1 registers. |
+
+Analog points MUST use `holding` or `input`. Binary points MUST use `coil` or
+`discrete`. `class` does not imply `space`.
 
 **`modbus-rtu`** — specified, not implemented: `device` (path), `baudrate` (default 9600).
 
@@ -225,6 +295,7 @@ To add a protocol: extend this section and `BindingSpec` first, keep
 | `certfile` | string | required at **boot** (PEM). `simbus check` does not open the file |
 | `keyfile` | string | required at **boot** (PEM). Same as `certfile` |
 | `cafile` | string? | omitted: server authenticates, client cert not required. Set to a PEM CA to require mTLS |
+| `export` | map | language 2: required, same shape as `modbus-tcp` |
 
 CLI/env may override `certfile` / `keyfile` / `cafile` / `port` ([runtime.md](runtime.md)). They do not rewrite the YAML. Missing or unreadable PEM at boot MUST fail the process (do not start a half-ready listener). Official maps under `devices/builtin/` MUST NOT declare this binding (Compose would need mounted PEM). Dual-bind: list `modbus-tcp` **and** `modbus-tls` in the same document.
 
@@ -235,18 +306,30 @@ CLI/env may override `certfile` / `keyfile` / `cafile` / `port` ([runtime.md](ru
 | Field | Type | Default |
 | --- | --- | --- |
 | `port` | uint16? | `4840` |
+| `export` | map | language 2: required, non-empty. Keys are point ids. Value is `{}` in this version. |
+
+Language 1 NodeIds stay `holding/{name}` (see [opcua.md](opcua.md)). Language 2
+uses `ns=N;s={id}` and folders `Input` / `Value` / `Output` from `class`.
+Writable when `class` is `value` or `output`.
 
 CLI `--opcua-port` / `SIMBUS_OPCUA_PORT` may override the port ([runtime.md](runtime.md)). It does not rewrite the YAML and MUST NOT enable OPC UA unless the document already has this binding. Official maps under `devices/builtin/` MUST NOT declare this binding (Compose does not publish 4840). Dual-bind: list `modbus-tcp` (and/or `modbus-tls`) **and** `opcua`. Address space, data types, and the lab endpoint (None / Anonymous) are [opcua.md](opcua.md). This version does not take PEM files.
 
 **`mqtt-sparkplug`** — specified, not implemented: `broker`, `group_id`, `edge_node_id`.
 
-**`bacnet-ip`** — specified, not implemented: `port` (default 47808), `device_instance`. Object maps are not in language version 1; they MUST be designed here before a BACnet runtime is written.
+**`bacnet-ip`** — specified, not implemented: `port` (default 47808),
+`device_instance`. Language 2 MUST also set `export` (non-empty). Each row
+has `object` (`analog-input` · `analog-value` · `analog-output` ·
+`binary-input` · `binary-value` · `binary-output`) and `instance` (uint32).
+Object type SHOULD match `kind` × `class`; `simbus check` MAY warn when it
+does not. Object maps were not in language 1.
 
 ---
 
-## 5. Register map
+## 5. Register map (language 1)
 
-Four spaces, Modbus names:
+Language 2 authors do not write this section: the loader materializes it from
+the first non-empty Modbus `export` so the engine and Modbus crate can keep an
+address bank. Language 1 authors write four spaces with Modbus names:
 
 | YAML key | Modbus | Client access |
 | --- | --- | --- |
@@ -292,7 +375,7 @@ two consecutive words and `endianness`.
 
 | Field | Type | Values |
 | --- | --- | --- |
-| `source_register` | string | MUST name a holding or input register |
+| `source_register` | string | MUST name a holding or input register. Language 2 alias: `source` (point id). |
 | `condition` | enum | `gt` · `lt` · `eq` · `gte` · `lte` |
 | `threshold` | float | Real-world units |
 
@@ -395,7 +478,20 @@ scenarios:
 
 Every step MUST have `action` and `at` (seconds from scenario start, ≥ 0).
 
-### 7.1 `set_register`
+Language 2 documents SHOULD use `set_point`. Language 1 `set_register` /
+`set_coil` remain valid against materialized names.
+
+### 7.1 `set_point`
+
+Writes a canonical point (engineering number or boolean) and shifts
+`state.base` when the point is analog.
+
+| Field | Type | Required | Constraint |
+| --- | --- | --- | --- |
+| `point` | string | yes | MUST be a point id |
+| `value` | number or bool | yes | Number if analog; boolean if binary |
+
+### 7.2 `set_register`
 
 Writes a real-world value and shifts `state.base`.
 
@@ -405,23 +501,23 @@ Writes a real-world value and shifts `state.base`.
 | `value` | float | yes | — | Real-world units |
 | `register_type` | string | no | `holding` | `holding` or `input` |
 
-### 7.2 `inject_fault`
+### 7.3 `inject_fault`
 
 | Field | Type | Required | Default | Constraint |
 | --- | --- | --- | --- | --- |
 | `fault_type` | enum | yes | — | `spike` · `freeze` · `dropout` · `alarm` · `noise_amplify` |
-| `register_name` | string | yes | — | Register for spike/freeze/dropout/noise_amplify; coil/discrete for `alarm` |
+| `register_name` | string | yes | — | Register or point id. YAML alias: `point`. Analog for spike/freeze/dropout/noise_amplify; binary for `alarm` |
 | `value` | float | no | — | Spike target or noise factor |
 | `duration_s` | float | no | `30` | MUST be > 0 |
 
-### 7.3 `set_coil`
+### 7.4 `set_coil`
 
 | Field | Type | Required |
 | --- | --- | --- |
-| `coil` | string | Coil or discrete `name` |
+| `coil` | string | Coil, discrete, or binary point `name` |
 | `value` | bool | Target state |
 
-### 7.4 `set_tick_interval`
+### 7.5 `set_tick_interval`
 
 | Field | Type | Constraint |
 | --- | --- | --- |
@@ -444,17 +540,18 @@ cargo run -p simbus -- check devices/builtin/generic-tnh-sensor.yaml
 The validator MUST reject a document when any of the following hold:
 
 - YAML does not match this schema
-- `spec_version` ≠ 1
+- `spec_version` is not `1` or `2` (omitted counts as `1`)
+- language 2: missing `points`, mixed `registers:`, empty `export` on a served binding, unknown export key
 - `modbus.unit_id` not in 1–247, or `default_port` = 0
-- duplicate holding/input names, or duplicate coil/discrete names
+- duplicate holding/input names, or duplicate coil/discrete names, or duplicate point ids
 - `scale` < 1
 - overlapping words in a space
-- trigger `source_register` unknown
-- alarm `trigger` not a coil/discrete
+- trigger `source` / `source_register` unknown
+- alarm `trigger` not a binary point / coil / discrete
 - behavior numeric constraints fail
 - embedded scenario missing/`id` not kebab-case/duplicate
-- scenario step names a register, coil, or space that does not exist
-- `inject_fault` missing `register_name`
+- scenario step names a point, register, coil, or space that does not exist
+- `inject_fault` missing `register_name` / `point`
 
 It MUST NOT reject unimplemented protocol bindings. It SHOULD print them.
 
@@ -467,11 +564,12 @@ alarms, and bundled scenario ids. That report is the human form of the contract.
 
 After a successful parse:
 
-1. Resolve bindings (infer Modbus TCP if the list is empty).
+1. Resolve bindings (language 1: infer Modbus TCP if the list is empty; language 2: do not infer).
 2. If any resolved protocol is unimplemented, **exit** with an error that names
    the protocol and points here.
-3. Instantiate the register bank from `default` values.
-4. Start the tick loop, Modbus TCP (if bound), and the HTTP control plane.
+3. Instantiate the register bank from materialized defaults (language 2: first
+   Modbus `export`; language 1: `registers:`).
+4. Start the tick loop, field listeners (if bound), and the HTTP control plane.
 5. Leave scenarios idle until `POST /scenarios/{id}/run`.
 
 CLI overrides (`--port`, `--modbus-tls-port`, `--modbus-cert` / `--modbus-key`

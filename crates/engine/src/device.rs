@@ -41,6 +41,31 @@ pub enum DeviceError {
         /// Coil address.
         address: u16,
     },
+    /// Unknown canonical point id.
+    #[error("point '{0}' not found")]
+    UnknownPoint(String),
+    /// PATCH / scenario value does not match analog vs binary.
+    #[error("point '{0}' value does not match kind")]
+    PointValueMismatch(String),
+}
+
+/// Live view of one canonical point.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PointView {
+    /// Point id (`analog_a`).
+    pub id: String,
+    /// Analog or binary.
+    pub kind: spec::PointKind,
+    /// Input / value / output.
+    pub class: spec::PointClass,
+    /// Human text.
+    pub description: String,
+    /// Engineering unit (analog).
+    pub unit: String,
+    /// Live analog value when the point is analog and backed by the bank.
+    pub analog: Option<f64>,
+    /// Live binary value when the point is binary and backed by the bank.
+    pub binary: Option<bool>,
 }
 
 /// Public view of an active fault.
@@ -215,6 +240,61 @@ impl Device {
     #[must_use]
     pub fn snapshot(&self) -> Snapshot {
         self.inner.read().bank.snapshot()
+    }
+
+    /// Live values for every canonical point (language 1 is lifted).
+    #[must_use]
+    pub fn points_snapshot(&self) -> Vec<PointView> {
+        let inner = self.inner.read();
+        self.spec
+            .points
+            .iter()
+            .map(|point| point_view_locked(&self.spec, &inner, point))
+            .collect()
+    }
+
+    /// Live value of one point.
+    #[must_use]
+    pub fn point_view(&self, id: &str) -> Option<PointView> {
+        let point = self.spec.point(id)?;
+        let inner = self.inner.read();
+        Some(point_view_locked(&self.spec, &inner, point))
+    }
+
+    /// Override a point by id (engineering `f64` or `bool`).
+    pub fn override_point(
+        &self,
+        id: &str,
+        analog: Option<f64>,
+        binary: Option<bool>,
+        source: &str,
+    ) -> Result<PointView, DeviceError> {
+        let point = self
+            .spec
+            .point(id)
+            .ok_or_else(|| DeviceError::UnknownPoint(id.to_owned()))?;
+        match point.kind {
+            spec::PointKind::Analog => {
+                let value = analog.ok_or_else(|| DeviceError::PointValueMismatch(id.to_owned()))?;
+                let (space, reg) = find_numeric_by_name(&self.spec, id)
+                    .ok_or_else(|| DeviceError::UnknownPoint(id.to_owned()))?;
+                self.override_register(space, reg.address, None, Some(value), source)?;
+            }
+            spec::PointKind::Binary => {
+                let value = binary.ok_or_else(|| DeviceError::PointValueMismatch(id.to_owned()))?;
+                if let Some(coil) = self.spec.registers.coils.iter().find(|c| c.name == id) {
+                    self.override_coil(coil.address, value)?;
+                } else if let Some(disc) =
+                    self.spec.registers.discrete.iter().find(|c| c.name == id)
+                {
+                    self.override_discrete(disc.address, value)?;
+                } else {
+                    return Err(DeviceError::UnknownPoint(id.to_owned()));
+                }
+            }
+        }
+        self.point_view(id)
+            .ok_or_else(|| DeviceError::UnknownPoint(id.to_owned()))
     }
 
     /// Read Modbus words. The range must be fully implemented (V1.1b3 §7).
@@ -413,6 +493,24 @@ impl Device {
                 };
                 let _ = self.override_register(space, reg.address, None, Some(s.value), "scenario");
             }
+            ScenarioStep::SetPoint(s) => {
+                let Some(point) = self.spec.point(&s.point) else {
+                    tracing::warn!(point = %s.point, "scenario step skipped: unknown point");
+                    return;
+                };
+                match point.kind {
+                    spec::PointKind::Analog => {
+                        if let Some(value) = s.value.as_analog() {
+                            let _ = self.override_point(&s.point, Some(value), None, "scenario");
+                        }
+                    }
+                    spec::PointKind::Binary => {
+                        if let Some(value) = s.value.as_bool() {
+                            let _ = self.override_point(&s.point, None, Some(value), "scenario");
+                        }
+                    }
+                }
+            }
             ScenarioStep::InjectFault(s) => {
                 self.inject_fault(ActiveFault::new(
                     s.fault_type,
@@ -514,6 +612,64 @@ fn find_numeric_by_name<'a>(
             find_register_by_name(spec, RegisterSpace::Input, name)
                 .map(|reg| (RegisterSpace::Input, reg))
         })
+}
+
+fn point_view_locked(spec: &DeviceSpec, inner: &Inner, point: &spec::PointSpec) -> PointView {
+    match point.kind {
+        spec::PointKind::Analog => {
+            let analog = find_numeric_by_name(spec, &point.id).and_then(|(space, reg)| {
+                inner
+                    .bank
+                    .get_cell(space, reg.address)
+                    .map(|cell| raw_to_real(cell, reg.scale))
+            });
+            PointView {
+                id: point.id.clone(),
+                kind: point.kind,
+                class: point.class,
+                description: point.description.clone(),
+                unit: point.unit.clone(),
+                analog,
+                binary: None,
+            }
+        }
+        spec::PointKind::Binary => {
+            let binary = spec
+                .registers
+                .coils
+                .iter()
+                .find(|c| c.name == point.id)
+                .and_then(|c| {
+                    inner
+                        .bank
+                        .has_coil(c.address)
+                        .then(|| inner.bank.read_coils(c.address, 1).into_iter().next())
+                        .flatten()
+                })
+                .or_else(|| {
+                    spec.registers
+                        .discrete
+                        .iter()
+                        .find(|c| c.name == point.id)
+                        .and_then(|c| {
+                            inner
+                                .bank
+                                .has_discrete(c.address)
+                                .then(|| inner.bank.read_discrete(c.address, 1).into_iter().next())
+                                .flatten()
+                        })
+                });
+            PointView {
+                id: point.id.clone(),
+                kind: point.kind,
+                class: point.class,
+                description: point.description.clone(),
+                unit: point.unit.clone(),
+                analog: None,
+                binary,
+            }
+        }
+    }
 }
 
 fn find_register_by_name<'a>(

@@ -1,6 +1,6 @@
 # Simulation Engine
 
-**Status:** normative for `crates/engine` (language version 1)  
+**Status:** normative for `crates/engine` (language versions 1 and 2)  
 **Device language:** [spec.md](spec.md)  
 **Process:** [runtime.md](runtime.md)  
 **HTTP session:** [control.md](control.md)  
@@ -96,7 +96,7 @@ Behaviors that **own** the live value (YAML range, list, or schedule):
 call `update_base`; the value is visible until the next tick, then
 overwritten from the waveform, draw, or schedule (§5).
 
-`PATCH /registers/…` and Modbus FC6/FC16 MUST call `update_base` for **each**
+`PATCH /registers/…`, `PATCH /points/{id}`, and Modbus FC6/FC16 MUST call `update_base` for **each**
 cell whose words changed: decode `raw / scale` (or the provided `real_value`)
 into `state.base`. For behaviors that use `state.base`, the next tick runs
 from that point. It MUST NOT snap back to YAML `default`. FC16 of two

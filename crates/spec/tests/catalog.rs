@@ -1,4 +1,4 @@
-use spec::{device_report, load_device_from_str};
+use spec::{device_report, load_device_from_path, load_device_from_str};
 
 fn tnh_yaml() -> &'static str {
     r"
@@ -127,7 +127,7 @@ steps: []
 #[test]
 fn defaults_spec_version_to_one() {
     let spec = load_device_from_str(tnh_yaml()).unwrap();
-    assert_eq!(spec.spec_version, spec::SPEC_VERSION);
+    assert_eq!(spec.spec_version, spec::SPEC_VERSION_MIN);
 }
 
 #[test]
@@ -264,6 +264,7 @@ registers:
             certfile,
             keyfile,
             cafile,
+            ..
         } => {
             assert_eq!(*port, 802);
             assert_eq!(certfile, "cert.pem");
@@ -323,7 +324,7 @@ registers:
     let spec = load_device_from_str(yaml).unwrap();
     assert!(spec.unimplemented_protocols().is_empty());
     match &spec.resolved_bindings()[0] {
-        spec::BindingSpec::Opcua { port } => assert_eq!(*port, 4840),
+        spec::BindingSpec::Opcua { port, .. } => assert_eq!(*port, 4840),
         other => panic!("expected opcua, got {other:?}"),
     }
     let report = device_report("opcua.yaml", &spec);
@@ -448,4 +449,118 @@ fn rejects_invalid_square_triangle_uniform_cycle() {
     ))
     .unwrap_err();
     assert!(err.to_string().contains("at least one value"), "{err}");
+}
+
+#[test]
+fn language_two_points_and_explicit_export() {
+    let yaml = r"
+name: Example
+spec_version: 2
+version: '1.0'
+type: example
+points:
+  - id: analog_a
+    kind: analog
+    class: value
+    unit: units
+    default: 50.0
+    simulation:
+      behavior: constant
+  - id: analog_a_high
+    kind: binary
+    class: input
+    default: false
+    trigger:
+      source: analog_a
+      condition: gt
+      threshold: 80.0
+bindings:
+  - protocol: modbus-tcp
+    port: 502
+    unit_id: 1
+    endianness: big
+    export:
+      analog_a:
+        space: holding
+        address: 0
+        scale: 10
+        data_type: uint16
+      analog_a_high:
+        space: coil
+        address: 0
+scenarios:
+  - id: demo-spike
+    name: Demo
+    steps:
+      - at: 0
+        action: set_point
+        point: analog_a
+        value: 95.0
+";
+    let spec = load_device_from_str(yaml).unwrap();
+    assert_eq!(spec.spec_version, 2);
+    assert_eq!(spec.points.len(), 2);
+    assert_eq!(spec.registers.holding[0].name, "analog_a");
+    assert_eq!(spec.registers.coils[0].name, "analog_a_high");
+    assert!(spec.bindings[0].protocol_id() == spec::ProtocolId::ModbusTcp);
+}
+
+#[test]
+fn language_two_requires_modbus_export() {
+    let yaml = r"
+name: Example
+spec_version: 2
+version: '1.0'
+type: example
+points:
+  - id: analog_a
+    kind: analog
+    class: value
+    default: 1.0
+bindings:
+  - protocol: modbus-tcp
+    port: 502
+";
+    let err = load_device_from_str(yaml).unwrap_err();
+    assert!(err.to_string().contains("export"), "{err}");
+}
+
+#[test]
+fn language_two_rejects_mixed_registers() {
+    let yaml = r"
+name: Example
+spec_version: 2
+version: '1.0'
+type: example
+points:
+  - id: analog_a
+    kind: analog
+    class: value
+    default: 1.0
+registers:
+  holding:
+    - address: 0
+      name: analog_a
+      default: 1.0
+bindings:
+  - protocol: modbus-tcp
+    port: 502
+    export:
+      analog_a:
+        space: holding
+        address: 0
+";
+    let err = load_device_from_str(yaml).unwrap_err();
+    assert!(err.to_string().contains("mix"), "{err}");
+}
+
+#[test]
+fn builtin_default_is_language_two() {
+    let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../devices/builtin/default.yaml");
+    let spec = load_device_from_path(path).unwrap();
+    assert_eq!(spec.spec_version, 2);
+    assert_eq!(spec.points.len(), 6);
+    assert_eq!(spec.ua_naming, spec::UaNaming::PointId);
+    assert_eq!(spec.registers.holding.len(), 4);
 }

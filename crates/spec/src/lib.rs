@@ -12,6 +12,7 @@ mod load;
 mod report;
 mod scenario;
 mod types;
+mod v2;
 
 pub use error::SpecError;
 pub use load::{
@@ -19,10 +20,13 @@ pub use load::{
 };
 pub use report::device_report;
 pub use scenario::{
-    InjectFaultStep, ScenarioSpec, ScenarioStep, SetCoilStep, SetRegisterStep, SetTickIntervalStep,
+    InjectFaultStep, PointLiteral, ScenarioSpec, ScenarioStep, SetCoilStep, SetPointStep,
+    SetRegisterStep, SetTickIntervalStep,
 };
 pub use types::{
-    AlarmSeverity, AlarmSpec, BehaviorSpec, BindingSpec, CoilSpec, DataType, DeviceSpec,
-    DriftModifier, Endianness, FaultType, IdentitySpec, ModbusSpec, ProtocolId, RegisterMapSpec,
-    RegisterSpace, RegisterSpec, SPEC_VERSION, StepEntry, TriggerCondition, TriggerSpec,
+    AlarmSeverity, AlarmSpec, BacnetExportEntry, BacnetObjectType, BehaviorSpec, BindingSpec,
+    CoilSpec, DataType, DeviceSpec, DriftModifier, Endianness, FaultType, IdentitySpec,
+    ModbusExportEntry, ModbusExportSpace, ModbusSpec, OpcuaExportEntry, PointClass, PointKind,
+    PointSpec, ProtocolId, RegisterMapSpec, RegisterSpace, RegisterSpec, SPEC_VERSION,
+    SPEC_VERSION_MIN, StepEntry, TriggerCondition, TriggerSpec, UaNaming,
 };

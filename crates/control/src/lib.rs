@@ -26,6 +26,7 @@ use utoipa::OpenApi;
 use utoipa_swagger_ui::SwaggerUi;
 
 use crate::routes::api_router;
+use crate::routes::points::stream_points;
 use crate::routes::registers::stream_registers;
 
 /// Shared application state.
@@ -88,6 +89,10 @@ impl AppState {
         routes::registers::override_coil,
         routes::registers::override_discrete,
         routes::registers::stream_registers,
+        routes::points::get_points,
+        routes::points::get_point,
+        routes::points::override_point,
+        routes::points::stream_points,
         routes::simulation::list_faults,
         routes::simulation::inject_fault,
         routes::simulation::clear_faults,
@@ -127,6 +132,7 @@ pub fn router(state: AppState, cors_origins: &[String]) -> Router {
     Router::new()
         .merge(SwaggerUi::new("/docs").url("/api-docs/openapi.json", ApiDoc::openapi()))
         .route("/registers/stream", get(stream_registers))
+        .route("/points/stream", get(stream_points))
         .merge(timed)
         .layer(TraceLayer::new_for_http())
         .layer(DefaultBodyLimit::max(64 * 1024))

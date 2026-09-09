@@ -1,6 +1,6 @@
 # simbus OPC UA
 
-**Status:** normative for `crates/opcua` (language version 1)  
+**Status:** normative for `crates/opcua` (language versions 1 and 2)  
 **Device language:** [spec.md](spec.md)  
 **Tick / `state.base`:** [simulation.md](simulation.md)  
 **Session HTTP:** [control.md](control.md)  
@@ -33,8 +33,9 @@ The binding MUST:
    OPC UA.
 2. Share one engine register bank with Modbus TCP/TLS, the tick loop, and
    the control plane.
-3. Expose each YAML register and coil as **one** OPC UA Variable (a YAML
-   `float32`/`uint32` is one node, not two PDU addresses).
+3. Expose each exported point (language 2) or each YAML register and coil
+   (language 1) as **one** OPC UA Variable (a YAML `float32`/`uint32` is one
+   node, not two PDU addresses).
 4. After a successful write to a writable node, update `state.base` the same
    way HTTP PATCH / Modbus FC6 do ([simulation.md](simulation.md) §3).
 
@@ -75,24 +76,40 @@ Namespace URI: `urn:simbus:{type}` where `{type}` is the YAML `type:` field.
 The server application URI is `urn:simbus` (not the same string — OPC UA
 reserves namespace index 1 for the application URI).
 
+### 3.1 Language 1 (`spec_version` omitted or 1)
+
 Under the standard `Objects` folder, four folders named `Holding`, `Input`,
 `Coils`, and `Discrete`. Empty YAML spaces still get an empty folder.
 
 | YAML | NodeId | UA DataType | Writable |
 | --- | --- | --- | --- |
-| `registers.holding` | `ns=N;s=holding/{name}` | §3.1 | yes |
-| `registers.input` | `ns=N;s=input/{name}` | §3.1 | no |
+| `registers.holding` | `ns=N;s=holding/{name}` | §3.3 | yes |
+| `registers.input` | `ns=N;s=input/{name}` | §3.3 | no |
 | `registers.coils` | `ns=N;s=coils/{name}` | Boolean | yes |
 | `registers.discrete` | `ns=N;s=discrete/{name}` | Boolean | no |
 
 `N` is the namespace index assigned at boot (not a fixed number). Browse
 names equal the YAML `name`. Display names equal the YAML `name`.
 
+### 3.2 Language 2 (`spec_version: 2`)
+
+Folders `Input`, `Value`, and `Output` from point `class`. Only ids listed
+in the `opcua` binding `export` are published (required, non-empty).
+
+| Point | NodeId | UA DataType | Writable |
+| --- | --- | --- | --- |
+| analog | `ns=N;s={id}` | §3.3 | `class` is `value` or `output` |
+| binary | `ns=N;s={id}` | Boolean | `class` is `value` or `output` |
+
+Browse names and display names equal the point `id`. Live values still come
+from the engine bank (Modbus export materializes the backing cells in this
+version).
+
 `identity.vendor` / `product` / `revision` MUST fill OPC UA `BuildInfo`
 (`manufacturer_name`, `product_name`, `software_version`). Empty strings are
 allowed.
 
-### 3.1 Numeric types
+### 3.3 Numeric types
 
 The value on the wire is the **engineering** value (`raw / scale`), not the
 Modbus word. Numeric nodes use OPC UA **Float** so a scaled `uint16` (for
@@ -105,10 +122,11 @@ Reads MUST call the live bank (getter), not a copy taken at boot.
 Subscriptions MAY sample that getter; the crate MUST NOT add a second tick
 loop to push values.
 
-Writes to holding MUST call `Device::override_register` with `source`
-`"opcua"`. Writes to coils MUST call `Device::override_coil`. Writes to
-input or discrete MUST fail as not writable. Type mismatch on write MUST
-fail the UA write (do not coerce a Boolean onto a float node).
+Writes to language-1 holding MUST call `Device::override_register` with
+`source` `"opcua"`. Writes to language-1 coils MUST call `Device::override_coil`.
+Writes to language-1 input or discrete MUST fail as not writable. Language-2
+writes follow `class` (`value` / `output` writable). Type mismatch on write
+MUST fail the UA write (do not coerce a Boolean onto a float node).
 
 ---
 
@@ -127,6 +145,7 @@ fail the UA write (do not coerce a Boolean onto a float node).
    `crates/opcua`.
 2. If only the **vendor map** changes, change [spec.md](spec.md). Do not
    re-specify NodeIds there beyond §4.
-3. Tests: connect Anonymous/None, read `holding/temperature` on the T&H
-   template (~22.5), write a holding node and see `state.base` move.
+3. Tests: connect Anonymous/None, read `holding/temperature` on the language-1
+   T&H template (~22.5), write a holding node and see `state.base` move.
+   Language 2 uses `ns=N;s={id}` under Input/Value/Output.
 4. Do not add SignAndEncrypt until this file says so.

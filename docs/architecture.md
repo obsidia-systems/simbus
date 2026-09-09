@@ -168,9 +168,9 @@ flowchart LR
     tick[tick dt] --> bank[(RegisterBank)]
     mb[Modbus FC3 / FC6] --> bank
     ua[OPC UA read / write] --> bank
-    patch[PATCH /registers] --> bank
+    patch[PATCH /registers or /points] --> bank
     bank --> sse[watch channel]
-    sse --> stream[GET /registers/stream]
+    sse --> stream["GET /registers/stream or /points/stream"]
 ```
 
 ---

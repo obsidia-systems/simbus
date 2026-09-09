@@ -6,7 +6,7 @@ use std::path::PathBuf;
 #[derive(Debug, thiserror::Error)]
 pub enum SpecError {
     /// Filesystem failure.
-    #[error("failed to read {path}: {source}")]
+    #[error("failed to read {path:?}: {source}")]
     Io {
         /// Path that could not be read.
         path: PathBuf,

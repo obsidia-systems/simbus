@@ -5,8 +5,11 @@ use serde::{Deserialize, Serialize};
 use crate::SpecError;
 use crate::scenario::{ScenarioSpec, ScenarioStep};
 
-/// Language version understood by this crate. Device YAML `spec_version` MUST equal this.
-pub const SPEC_VERSION: u32 = 1;
+/// Current device language. Documents may use `1` (register map) or `2` (points).
+pub const SPEC_VERSION: u32 = 2;
+
+/// Oldest language this crate still loads (`registers:` maps).
+pub const SPEC_VERSION_MIN: u32 = 1;
 
 /// Byte order for multi-register values.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -507,7 +510,8 @@ fn default_scale() -> u32 {
 /// Coil or discrete trigger.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct TriggerSpec {
-    /// Source holding or input register name.
+    /// Source analog point / register id.
+    #[serde(alias = "source")]
     pub source_register: String,
     /// Comparison.
     pub condition: TriggerCondition,
@@ -563,6 +567,16 @@ pub struct ModbusSpec {
     pub endianness: Endianness,
 }
 
+impl Default for ModbusSpec {
+    fn default() -> Self {
+        Self {
+            default_port: 502,
+            unit_id: 1,
+            endianness: Endianness::Big,
+        }
+    }
+}
+
 fn default_unit_id() -> u8 {
     1
 }
@@ -578,6 +592,299 @@ pub struct AlarmSpec {
     pub trigger: String,
 }
 
+/// Analog vs binary point.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PointKind {
+    /// Engineering real (`f64` in the engine).
+    Analog,
+    /// Two-state.
+    Binary,
+}
+
+impl PointKind {
+    /// Canonical YAML string.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Analog => "analog",
+            Self::Binary => "binary",
+        }
+    }
+}
+
+/// ASHRAE Input / Value / Output class.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PointClass {
+    /// Measured. Tick owns the value.
+    Input,
+    /// Setpoint / parameter / software point.
+    Value,
+    /// Command to an actuator.
+    Output,
+}
+
+impl PointClass {
+    /// Canonical YAML string.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Input => "input",
+            Self::Value => "value",
+            Self::Output => "output",
+        }
+    }
+
+    /// OPC UA / typical field write for this class.
+    #[must_use]
+    pub const fn field_writable(self) -> bool {
+        matches!(self, Self::Value | Self::Output)
+    }
+}
+
+/// How OPC UA NodeIds are built.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum UaNaming {
+    /// `ns=N;s=holding/{name}` (language 1).
+    #[default]
+    SpacePrefix,
+    /// `ns=N;s={id}` (language 2).
+    PointId,
+}
+
+/// One device point (canonical after load).
+#[derive(Debug, Clone, PartialEq)]
+pub struct PointSpec {
+    /// Stable id (`temperature`). Unique in the document.
+    pub id: String,
+    /// Analog or binary.
+    pub kind: PointKind,
+    /// Input / value / output.
+    pub class: PointClass,
+    /// Human text.
+    pub description: String,
+    /// Engineering unit.
+    pub unit: String,
+    /// Analog power-on value.
+    pub analog_default: f64,
+    /// Binary power-on value.
+    pub binary_default: bool,
+    /// Analog live behavior.
+    pub simulation: Option<BehaviorSpec>,
+    /// Binary input derived from an analog point.
+    pub trigger: Option<TriggerSpec>,
+}
+
+impl PointSpec {
+    pub(crate) fn from_register(reg: &RegisterSpec, class: PointClass) -> Self {
+        Self {
+            id: reg.name.clone(),
+            kind: PointKind::Analog,
+            class,
+            description: reg.description.clone(),
+            unit: reg.unit.clone(),
+            analog_default: reg.default,
+            binary_default: false,
+            simulation: reg.simulation.clone(),
+            trigger: None,
+        }
+    }
+
+    pub(crate) fn from_coil(coil: &CoilSpec, class: PointClass) -> Self {
+        Self {
+            id: coil.name.clone(),
+            kind: PointKind::Binary,
+            class,
+            description: coil.description.clone(),
+            unit: String::new(),
+            analog_default: 0.0,
+            binary_default: coil.default,
+            simulation: None,
+            trigger: coil.trigger.clone(),
+        }
+    }
+}
+
+/// Modbus table for a point export.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ModbusExportSpace {
+    /// FC3 / FC6 / FC16.
+    Holding,
+    /// FC4.
+    Input,
+    /// FC1 / FC5 / FC15.
+    Coil,
+    /// FC2.
+    Discrete,
+}
+
+fn modbus_export_from_registers(
+    registers: &RegisterMapSpec,
+) -> std::collections::BTreeMap<String, ModbusExportEntry> {
+    let mut export = std::collections::BTreeMap::new();
+    for reg in &registers.holding {
+        export.insert(
+            reg.name.clone(),
+            ModbusExportEntry {
+                space: ModbusExportSpace::Holding,
+                address: reg.address,
+                scale: reg.scale,
+                data_type: reg.data_type,
+            },
+        );
+    }
+    for reg in &registers.input {
+        export.insert(
+            reg.name.clone(),
+            ModbusExportEntry {
+                space: ModbusExportSpace::Input,
+                address: reg.address,
+                scale: reg.scale,
+                data_type: reg.data_type,
+            },
+        );
+    }
+    for coil in &registers.coils {
+        export.insert(
+            coil.name.clone(),
+            ModbusExportEntry {
+                space: ModbusExportSpace::Coil,
+                address: coil.address,
+                scale: 1,
+                data_type: DataType::Uint16,
+            },
+        );
+    }
+    for disc in &registers.discrete {
+        export.insert(
+            disc.name.clone(),
+            ModbusExportEntry {
+                space: ModbusExportSpace::Discrete,
+                address: disc.address,
+                scale: 1,
+                data_type: DataType::Uint16,
+            },
+        );
+    }
+    export
+}
+
+/// Lift a language-1 register map into canonical points.
+pub(crate) fn lift_v1(spec: &mut DeviceSpec) {
+    spec.ua_naming = UaNaming::SpacePrefix;
+    spec.points.clear();
+    for reg in &spec.registers.holding {
+        spec.points
+            .push(PointSpec::from_register(reg, PointClass::Value));
+    }
+    for reg in &spec.registers.input {
+        spec.points
+            .push(PointSpec::from_register(reg, PointClass::Input));
+    }
+    for coil in &spec.registers.coils {
+        let class = if coil.trigger.is_some() {
+            PointClass::Input
+        } else {
+            PointClass::Value
+        };
+        spec.points.push(PointSpec::from_coil(coil, class));
+    }
+    for disc in &spec.registers.discrete {
+        spec.points
+            .push(PointSpec::from_coil(disc, PointClass::Input));
+    }
+}
+
+impl ModbusExportSpace {
+    /// Canonical YAML string.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Holding => "holding",
+            Self::Input => "input",
+            Self::Coil => "coil",
+            Self::Discrete => "discrete",
+        }
+    }
+}
+
+/// One row in a Modbus `export:` map.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ModbusExportEntry {
+    /// Target table.
+    pub space: ModbusExportSpace,
+    /// Zero-based address.
+    pub address: u16,
+    /// Analog only. `raw ≈ eng × scale`.
+    #[serde(default = "default_scale")]
+    pub scale: u32,
+    /// Analog only.
+    #[serde(default)]
+    pub data_type: DataType,
+}
+
+/// Placeholder so YAML `temperature: {}` deserializes.
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+pub struct OpcuaExportEntry {}
+
+/// BACnet object type in `export.object`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum BacnetObjectType {
+    /// Analog Input.
+    AnalogInput,
+    /// Analog Value.
+    AnalogValue,
+    /// Analog Output.
+    AnalogOutput,
+    /// Binary Input.
+    BinaryInput,
+    /// Binary Value.
+    BinaryValue,
+    /// Binary Output.
+    BinaryOutput,
+}
+
+impl BacnetObjectType {
+    /// Canonical YAML string.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::AnalogInput => "analog-input",
+            Self::AnalogValue => "analog-value",
+            Self::AnalogOutput => "analog-output",
+            Self::BinaryInput => "binary-input",
+            Self::BinaryValue => "binary-value",
+            Self::BinaryOutput => "binary-output",
+        }
+    }
+
+    /// Whether this matches `kind` × `class`.
+    #[must_use]
+    pub const fn matches_point(self, kind: PointKind, class: PointClass) -> bool {
+        matches!(
+            (self, kind, class),
+            (Self::AnalogInput, PointKind::Analog, PointClass::Input)
+                | (Self::AnalogValue, PointKind::Analog, PointClass::Value)
+                | (Self::AnalogOutput, PointKind::Analog, PointClass::Output)
+                | (Self::BinaryInput, PointKind::Binary, PointClass::Input)
+                | (Self::BinaryValue, PointKind::Binary, PointClass::Value)
+                | (Self::BinaryOutput, PointKind::Binary, PointClass::Output)
+        )
+    }
+}
+
+/// One row in a BACnet `export:` map.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct BacnetExportEntry {
+    /// ASHRAE object type.
+    pub object: BacnetObjectType,
+    /// Object instance.
+    pub instance: u32,
+}
+
 /// A protocol binding declared on the device.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "protocol", rename_all = "kebab-case")]
@@ -590,6 +897,12 @@ pub enum BindingSpec {
         /// Unit ID override.
         #[serde(default)]
         unit_id: Option<u8>,
+        /// Multi-word endianness (language 2; language 1 uses top-level `modbus`).
+        #[serde(default)]
+        endianness: Endianness,
+        /// Point id → PDU address. Required and non-empty in language 2.
+        #[serde(default)]
+        export: std::collections::BTreeMap<String, ModbusExportEntry>,
     },
     /// Modbus RTU slave.
     ModbusRtu {
@@ -611,6 +924,9 @@ pub enum BindingSpec {
         /// Optional PEM CA; when set, the server requires a client certificate.
         #[serde(default)]
         cafile: Option<String>,
+        /// Point id → PDU address. Required and non-empty in language 2.
+        #[serde(default)]
+        export: std::collections::BTreeMap<String, ModbusExportEntry>,
     },
     /// SNMP v2c agent.
     #[serde(rename = "snmp-v2c")]
@@ -630,6 +946,9 @@ pub enum BindingSpec {
         /// Listen port.
         #[serde(default = "default_opcua_port")]
         port: u16,
+        /// Point ids to publish. Required and non-empty in language 2.
+        #[serde(default)]
+        export: std::collections::BTreeMap<String, OpcuaExportEntry>,
     },
     /// Sparkplug B MQTT publisher.
     MqttSparkplug {
@@ -647,6 +966,9 @@ pub enum BindingSpec {
         port: u16,
         /// BACnet device instance.
         device_instance: u32,
+        /// Point id → object + instance. Required and non-empty in language 2.
+        #[serde(default)]
+        export: std::collections::BTreeMap<String, BacnetExportEntry>,
     },
 }
 
@@ -695,7 +1017,7 @@ impl BindingSpec {
 pub struct DeviceSpec {
     /// Display name.
     pub name: String,
-    /// Language version. MUST be `1` for this crate. Omitted files default to `1`.
+    /// Language version. Omitted files default to `1`.
     #[serde(default = "default_spec_version")]
     pub spec_version: u32,
     /// Map / product version string (not the language version).
@@ -709,7 +1031,8 @@ pub struct DeviceSpec {
     /// Optional identity.
     #[serde(default)]
     pub identity: IdentitySpec,
-    /// Modbus defaults (required for v1 files).
+    /// Modbus defaults (language 1 YAML, or derived from a language 2 binding).
+    #[serde(default)]
     pub modbus: ModbusSpec,
     /// Register map.
     #[serde(default)]
@@ -723,10 +1046,16 @@ pub struct DeviceSpec {
     /// Scenarios bundled with this device. Loaded at boot; not auto-run.
     #[serde(default)]
     pub scenarios: Vec<ScenarioSpec>,
+    /// Canonical points (filled at load: language 2 YAML or language 1 lift).
+    #[serde(default, skip)]
+    pub points: Vec<PointSpec>,
+    /// OPC UA NodeId style.
+    #[serde(default, skip)]
+    pub ua_naming: UaNaming,
 }
 
 fn default_spec_version() -> u32 {
-    SPEC_VERSION
+    SPEC_VERSION_MIN
 }
 
 impl DeviceSpec {
@@ -734,10 +1063,16 @@ impl DeviceSpec {
     #[must_use]
     pub fn resolved_bindings(&self) -> Vec<BindingSpec> {
         if self.bindings.is_empty() {
-            vec![BindingSpec::ModbusTcp {
-                port: Some(self.modbus.default_port),
-                unit_id: Some(self.modbus.unit_id),
-            }]
+            if self.spec_version >= 2 {
+                Vec::new()
+            } else {
+                vec![BindingSpec::ModbusTcp {
+                    port: Some(self.modbus.default_port),
+                    unit_id: Some(self.modbus.unit_id),
+                    endianness: self.modbus.endianness,
+                    export: modbus_export_from_registers(&self.registers),
+                }]
+            }
         } else {
             self.bindings.clone()
         }
@@ -761,10 +1096,10 @@ impl DeviceSpec {
 
     /// Validate cross-references and numeric constraints.
     pub fn validate(&self) -> Result<(), SpecError> {
-        if self.spec_version != SPEC_VERSION {
+        if self.spec_version < SPEC_VERSION_MIN || self.spec_version > SPEC_VERSION {
             return Err(SpecError::Validation(format!(
-                "spec_version {} is not supported (this runtime understands {})",
-                self.spec_version, SPEC_VERSION
+                "spec_version {} is not supported (this runtime understands {}–{})",
+                self.spec_version, SPEC_VERSION_MIN, SPEC_VERSION
             )));
         }
         if self.modbus.unit_id == 0 || self.modbus.unit_id > 247 {
@@ -831,7 +1166,12 @@ impl DeviceSpec {
         }
 
         for alarm in &self.alarms {
-            if !coil_names.contains(alarm.trigger.as_str()) {
+            let known_coil = coil_names.contains(alarm.trigger.as_str());
+            let known_binary = self
+                .points
+                .iter()
+                .any(|p| p.kind == PointKind::Binary && p.id == alarm.trigger);
+            if !known_coil && !known_binary {
                 return Err(SpecError::Validation(format!(
                     "alarm '{}': references unknown coil '{}'",
                     alarm.name, alarm.trigger
@@ -839,8 +1179,200 @@ impl DeviceSpec {
             }
         }
 
+        self.validate_points()?;
+        if self.spec_version >= 2 {
+            self.validate_v2_bindings()?;
+        }
         self.validate_scenarios()?;
         Ok(())
+    }
+
+    fn validate_points(&self) -> Result<(), SpecError> {
+        if self.spec_version >= 2 && self.points.is_empty() {
+            return Err(SpecError::Validation(
+                "language 2: points must not be empty".into(),
+            ));
+        }
+        let mut ids = std::collections::HashSet::new();
+        for point in &self.points {
+            if point.id.is_empty() {
+                return Err(SpecError::Validation("point id must not be empty".into()));
+            }
+            if !ids.insert(point.id.as_str()) {
+                return Err(SpecError::Validation(format!(
+                    "duplicate point id '{}'",
+                    point.id
+                )));
+            }
+            match point.kind {
+                PointKind::Analog => {
+                    if point.trigger.is_some() {
+                        return Err(SpecError::Validation(format!(
+                            "point '{}': analog points cannot have trigger",
+                            point.id
+                        )));
+                    }
+                    if let Some(sim) = &point.simulation {
+                        sim.validate(&format!("point '{}'", point.id))?;
+                    }
+                }
+                PointKind::Binary => {
+                    if point.simulation.is_some() {
+                        return Err(SpecError::Validation(format!(
+                            "point '{}': binary points cannot have simulation",
+                            point.id
+                        )));
+                    }
+                }
+            }
+        }
+        for point in &self.points {
+            if let Some(trigger) = &point.trigger {
+                let Some(src) = self.point(&trigger.source_register) else {
+                    return Err(SpecError::Validation(format!(
+                        "point '{}': trigger references unknown point '{}'",
+                        point.id, trigger.source_register
+                    )));
+                };
+                if src.kind != PointKind::Analog {
+                    return Err(SpecError::Validation(format!(
+                        "point '{}': trigger source '{}' must be analog",
+                        point.id, trigger.source_register
+                    )));
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn validate_v2_bindings(&self) -> Result<(), SpecError> {
+        for binding in &self.bindings {
+            match binding {
+                BindingSpec::ModbusTcp { export, .. } | BindingSpec::ModbusTls { export, .. } => {
+                    if export.is_empty() {
+                        return Err(SpecError::Validation(
+                            "language 2: modbus bindings require a non-empty export".into(),
+                        ));
+                    }
+                    self.validate_modbus_export(export)?;
+                }
+                BindingSpec::Opcua { export, .. } => {
+                    if export.is_empty() {
+                        return Err(SpecError::Validation(
+                            "language 2: opcua bindings require a non-empty export".into(),
+                        ));
+                    }
+                    for id in export.keys() {
+                        if self.point(id).is_none() {
+                            return Err(SpecError::Validation(format!(
+                                "opcua export '{id}' is not a point"
+                            )));
+                        }
+                    }
+                }
+                BindingSpec::BacnetIp { export, .. } => {
+                    if export.is_empty() {
+                        return Err(SpecError::Validation(
+                            "language 2: bacnet-ip bindings require a non-empty export".into(),
+                        ));
+                    }
+                    for (id, entry) in export {
+                        let Some(point) = self.point(id) else {
+                            return Err(SpecError::Validation(format!(
+                                "bacnet export '{id}' is not a point"
+                            )));
+                        };
+                        let _ = (point, entry);
+                    }
+                }
+                _ => {}
+            }
+        }
+        Ok(())
+    }
+
+    fn validate_modbus_export(
+        &self,
+        export: &std::collections::BTreeMap<String, ModbusExportEntry>,
+    ) -> Result<(), SpecError> {
+        let mut holding: std::collections::HashSet<u16> = std::collections::HashSet::new();
+        let mut input: std::collections::HashSet<u16> = std::collections::HashSet::new();
+        let mut coils: std::collections::HashSet<u16> = std::collections::HashSet::new();
+        let mut discrete: std::collections::HashSet<u16> = std::collections::HashSet::new();
+        for (id, entry) in export {
+            let Some(point) = self.point(id) else {
+                return Err(SpecError::Validation(format!(
+                    "modbus export '{id}' is not a point"
+                )));
+            };
+            match (point.kind, entry.space) {
+                (PointKind::Analog, ModbusExportSpace::Holding | ModbusExportSpace::Input) => {
+                    if entry.scale == 0 {
+                        return Err(SpecError::Validation(format!(
+                            "modbus export '{id}': scale must be >= 1"
+                        )));
+                    }
+                }
+                (PointKind::Binary, ModbusExportSpace::Coil | ModbusExportSpace::Discrete) => {}
+                (_kind, space) => {
+                    return Err(SpecError::Validation(format!(
+                        "modbus export '{id}': {} point cannot use space {}",
+                        point.kind.as_str(),
+                        space.as_str()
+                    )));
+                }
+            }
+            let occupied = match entry.space {
+                ModbusExportSpace::Holding => &mut holding,
+                ModbusExportSpace::Input => &mut input,
+                ModbusExportSpace::Coil => &mut coils,
+                ModbusExportSpace::Discrete => &mut discrete,
+            };
+            let words = if point.kind == PointKind::Analog {
+                u16::from(entry.data_type.word_count())
+            } else {
+                1
+            };
+            for offset in 0..words {
+                let addr = entry.address.saturating_add(offset);
+                if !occupied.insert(addr) {
+                    return Err(SpecError::Validation(format!(
+                        "modbus {} address {addr} overlaps another export",
+                        entry.space.as_str()
+                    )));
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Notes when a BACnet object does not match `kind` × `class`.
+    #[must_use]
+    pub fn bacnet_export_warnings(&self) -> Vec<String> {
+        let mut out = Vec::new();
+        for binding in &self.bindings {
+            if let BindingSpec::BacnetIp { export, .. } = binding {
+                for (id, entry) in export {
+                    if let Some(point) = self.point(id)
+                        && !entry.object.matches_point(point.kind, point.class)
+                    {
+                        out.push(format!(
+                            "bacnet export '{id}' is {} but point is {} {}",
+                            entry.object.as_str(),
+                            point.kind.as_str(),
+                            point.class.as_str()
+                        ));
+                    }
+                }
+            }
+        }
+        out
+    }
+
+    /// Look up a canonical point.
+    #[must_use]
+    pub fn point(&self, id: &str) -> Option<&PointSpec> {
+        self.points.iter().find(|p| p.id == id)
     }
 
     /// Validate one scenario against this device's register and coil names.
@@ -900,6 +1432,32 @@ impl DeviceSpec {
                         )));
                     }
                 }
+                ScenarioStep::SetPoint(s) => {
+                    let Some(point) = self.point(&s.point) else {
+                        return Err(SpecError::Validation(format!(
+                            "{ctx}: set_point '{}' not found",
+                            s.point
+                        )));
+                    };
+                    match point.kind {
+                        crate::PointKind::Analog => {
+                            if s.value.as_analog().is_none() {
+                                return Err(SpecError::Validation(format!(
+                                    "{ctx}: set_point '{}' needs a numeric value",
+                                    s.point
+                                )));
+                            }
+                        }
+                        crate::PointKind::Binary => {
+                            if s.value.as_bool().is_none() {
+                                return Err(SpecError::Validation(format!(
+                                    "{ctx}: set_point '{}' needs a boolean value",
+                                    s.point
+                                )));
+                            }
+                        }
+                    }
+                }
                 ScenarioStep::SetCoil(s) => {
                     if !coil_names.contains(s.coil.as_str()) {
                         return Err(SpecError::Validation(format!(
@@ -914,18 +1472,28 @@ impl DeviceSpec {
                             "{ctx}: inject_fault requires register_name"
                         )));
                     };
+                    let analog = self
+                        .points
+                        .iter()
+                        .any(|p| p.kind == crate::PointKind::Analog && p.id == target)
+                        || register_names.contains(target);
+                    let binary = self
+                        .points
+                        .iter()
+                        .any(|p| p.kind == crate::PointKind::Binary && p.id == target)
+                        || coil_names.contains(target);
                     match s.fault_type {
                         FaultType::Alarm => {
-                            if !coil_names.contains(target) {
+                            if !binary {
                                 return Err(SpecError::Validation(format!(
-                                    "{ctx}: inject_fault alarm target '{target}' is not a coil"
+                                    "{ctx}: inject_fault alarm target '{target}' is not a binary point"
                                 )));
                             }
                         }
                         _ => {
-                            if !register_names.contains(target) {
+                            if !analog {
                                 return Err(SpecError::Validation(format!(
-                                    "{ctx}: inject_fault target '{target}' is not a register"
+                                    "{ctx}: inject_fault target '{target}' is not an analog point"
                                 )));
                             }
                         }

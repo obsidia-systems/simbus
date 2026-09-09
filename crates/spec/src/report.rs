@@ -42,12 +42,27 @@ pub fn device_report(path: &str, spec: &DeviceSpec) -> String {
     }
     out.push('\n');
     out.push_str(&format!(
-        "  counts       holding {}  input {}  coils {}  discrete {}\n",
+        "  counts       points {}  holding {}  input {}  coils {}  discrete {}\n",
+        spec.points.len(),
         spec.registers.holding.len(),
         spec.registers.input.len(),
         spec.registers.coils.len(),
         spec.registers.discrete.len()
     ));
+    if spec.spec_version >= 2 && !spec.points.is_empty() {
+        out.push_str("\n  points\n");
+        for point in &spec.points {
+            out.push_str(&format!(
+                "    {:<24} {:<8} {:<8}\n",
+                point.id,
+                point.kind.as_str(),
+                point.class.as_str()
+            ));
+        }
+    }
+    for note in spec.bacnet_export_warnings() {
+        out.push_str(&format!("  note         {note}\n"));
+    }
     append_regs(&mut out, "holding", &spec.registers.holding);
     append_regs(&mut out, "input", &spec.registers.input);
     append_coils(&mut out, "coils", &spec.registers.coils);
@@ -79,7 +94,7 @@ pub fn device_report(path: &str, spec: &DeviceSpec) -> String {
 
 fn describe_binding(binding: &BindingSpec) -> String {
     match binding {
-        BindingSpec::ModbusTcp { port, unit_id } => {
+        BindingSpec::ModbusTcp { port, unit_id, .. } => {
             let port = port.map_or_else(|| "default".to_owned(), |p| p.to_string());
             let unit = unit_id.unwrap_or(1);
             format!("modbus-tcp :{port} unit {unit}")
@@ -99,7 +114,7 @@ fn describe_binding(binding: &BindingSpec) -> String {
         } => {
             format!("snmp-v2c :{port} community {community}")
         }
-        BindingSpec::Opcua { port } => format!("opcua :{port}"),
+        BindingSpec::Opcua { port, .. } => format!("opcua :{port}"),
         BindingSpec::MqttSparkplug {
             broker,
             group_id,
@@ -108,6 +123,7 @@ fn describe_binding(binding: &BindingSpec) -> String {
         BindingSpec::BacnetIp {
             port,
             device_instance,
+            ..
         } => format!("bacnet-ip :{port} instance {device_instance}"),
     }
 }

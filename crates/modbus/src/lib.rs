@@ -131,7 +131,9 @@ fn exception(err: DeviceError) -> ExceptionCode {
         DeviceError::UnknownRegister { .. }
         | DeviceError::UnknownCoilAddress { .. }
         | DeviceError::UnknownRegisterName(_)
-        | DeviceError::UnknownCoil(_) => ExceptionCode::IllegalDataAddress,
+        | DeviceError::UnknownCoil(_)
+        | DeviceError::UnknownPoint(_) => ExceptionCode::IllegalDataAddress,
+        DeviceError::PointValueMismatch(_) => ExceptionCode::IllegalDataValue,
     }
 }
 

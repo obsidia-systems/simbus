@@ -4,7 +4,52 @@ use serde::{Deserialize, Serialize};
 
 use crate::{FaultType, SpecError};
 
-/// Set a holding or input register to a real-world value.
+/// Analog vs binary literal for `set_point`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum PointLiteral {
+    /// Boolean.
+    Bool(bool),
+    /// Signed integer (YAML `50`).
+    Int(i64),
+    /// Float.
+    Float(f64),
+}
+
+impl PointLiteral {
+    /// Analog engineering value.
+    #[must_use]
+    pub fn as_analog(&self) -> Option<f64> {
+        match *self {
+            Self::Float(v) => Some(v),
+            Self::Int(v) => Some(v as f64),
+            Self::Bool(_) => None,
+        }
+    }
+
+    /// Binary value.
+    #[must_use]
+    pub fn as_bool(&self) -> Option<bool> {
+        match *self {
+            Self::Bool(v) => Some(v),
+            Self::Int(0) => Some(false),
+            Self::Int(1) => Some(true),
+            _ => None,
+        }
+    }
+}
+
+/// Set a point by id (language 2).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SetPointStep {
+    /// Seconds from scenario start.
+    pub at: f64,
+    /// Point id.
+    pub point: String,
+    /// Engineering or boolean value.
+    pub value: PointLiteral,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SetRegisterStep {
     /// Seconds from scenario start.
@@ -29,8 +74,8 @@ pub struct InjectFaultStep {
     pub at: f64,
     /// Fault kind.
     pub fault_type: FaultType,
-    /// Target register or coil name.
-    #[serde(default)]
+    /// Target register, coil, or point id.
+    #[serde(default, alias = "point")]
     pub register_name: Option<String>,
     /// Spike target or noise factor.
     #[serde(default)]
@@ -70,6 +115,8 @@ pub struct SetTickIntervalStep {
 pub enum ScenarioStep {
     /// Write a register and shift `state.base`.
     SetRegister(SetRegisterStep),
+    /// Write a canonical point (language 2).
+    SetPoint(SetPointStep),
     /// Inject a fault.
     InjectFault(InjectFaultStep),
     /// Write a coil or discrete.
@@ -84,6 +131,7 @@ impl ScenarioStep {
     pub fn at(&self) -> f64 {
         match self {
             Self::SetRegister(s) => s.at,
+            Self::SetPoint(s) => s.at,
             Self::InjectFault(s) => s.at,
             Self::SetCoil(s) => s.at,
             Self::SetTickInterval(s) => s.at,

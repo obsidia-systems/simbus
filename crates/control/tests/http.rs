@@ -167,6 +167,9 @@ async fn openapi_lists_session_routes() {
         "/registers",
         "/registers/stream",
         "/registers/{address}",
+        "/points",
+        "/points/stream",
+        "/points/{id}",
         "/faults",
         "/simulation",
         "/simulation/reset",
@@ -224,6 +227,37 @@ async fn get_registers_returns_defaults() {
     let body = response.into_body().collect().await.unwrap().to_bytes();
     let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
     assert_eq!(json["holding"]["0"], 225);
+}
+
+#[tokio::test]
+async fn get_and_patch_points_use_lifted_ids() {
+    let response = app()
+        .oneshot(Request::get("/points").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response.into_body().collect().await.unwrap().to_bytes();
+    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    let points = json.as_array().expect("points list");
+    assert!(
+        points.iter().any(|p| p["id"] == "temperature"),
+        "expected lifted temperature point: {json}"
+    );
+
+    let response = app()
+        .oneshot(json_request(
+            "PATCH",
+            "/points/temperature",
+            r#"{"value": 27.0}"#,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response.into_body().collect().await.unwrap().to_bytes();
+    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(json["id"], "temperature");
+    assert_eq!(json["kind"], "analog");
+    assert_eq!(json["value"], 27.0);
 }
 
 #[tokio::test]

@@ -42,6 +42,11 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Tick behaviors `square`, `triangle`, `uniform`, and `cycle` (YAML kinds;
   formulas in `docs/simulation.md`). Same live bank as Modbus and OPC UA.
   `cosine` / PID walk / UA `qv` stay deferred (`docs/debt.md`).
+- Device language **2**: canonical `points:` (`kind` analog/binary, ASHRAE
+  `class` input/value/output) with explicit protocol `export`. Language 1
+  register maps still load and are lifted to points. Session API `GET`/`PATCH
+  /points/{id}` and `GET /points/stream` (`simbus ctl points` / `set-point`).
+  OPC UA language 2 NodeIds are `ns=N;s={id}` under Input/Value/Output folders.
 - OPC UA field plane: `protocol: opcua` serves the same YAML map on IANA
   **4840** (`crates/opcua`, async-opcua, None + Anonymous). Dual-bind with
   Modbus TCP/TLS. Official builtin maps stay Modbus-only. `/status.opcua_port`
@@ -57,6 +62,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Changed
 
+- `devices/builtin/default.yaml` is language 2 (`points:` + Modbus `export`).
+  Other builtin and community maps stay language 1 in this cut.
 - Boot is file-only: `--file` / `SIMBUS_YAML_PATH`, else the default template.
   There is no `--type` / `SIMBUS_DEVICE_TYPE` / `--devices-dir`. Official maps
   are templates you point `--file` at. The YAML field `type:` remains identity

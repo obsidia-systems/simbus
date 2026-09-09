@@ -88,6 +88,21 @@ pub struct CoilOverrideRequest {
     pub value: bool,
 }
 
+#[derive(Debug, Serialize)]
+pub struct PointResponse {
+    pub id: String,
+    pub kind: String,
+    pub class: String,
+    pub description: String,
+    pub unit: String,
+    pub value: Option<serde_json::Value>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct PointOverrideRequest {
+    pub value: serde_json::Value,
+}
+
 #[derive(Debug, Deserialize)]
 pub struct FaultRequest {
     pub fault_type: FaultType,

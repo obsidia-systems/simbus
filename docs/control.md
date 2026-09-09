@@ -68,7 +68,7 @@ Runtime binds `SIMBUS_API_HOST`:`SIMBUS_API_PORT` (defaults `0.0.0.0:8000`).
 | Rule | Value |
 | --- | --- |
 | JSON body limit | 64 KiB |
-| Request timeout | 30 s on all routes **except** `GET /registers/stream` |
+| Request timeout | 30 s on all routes **except** `GET /registers/stream` and `GET /points/stream` |
 | CORS | `SIMBUS_CORS_ORIGINS` (`*` = permissive) |
 | Writes | If `SIMBUS_API_KEY` is set: `x-api-key` or `Authorization: Bearer`. Else open. |
 
@@ -98,7 +98,10 @@ document has no `opcua` binding.
 `/config.modbus_port` is the YAML `modbus.default_port`. TCP listen and YAML
 default differ when CLI overrides `--port`.
 
-### Registers
+### Registers and points
+
+Language 1 address routes stay. Language 2 (and lifted language 1) also
+expose canonical points. Prefer points when talking to a language-2 device.
 
 | Method | Path | Notes |
 | --- | --- | --- |
@@ -108,12 +111,17 @@ default differ when CLI overrides `--port`.
 | `PATCH` | `/registers/coils/{address}` | Coil; trigger coils are overwritten next tick |
 | `PATCH` | `/registers/discrete/{address}` | Discrete |
 | `GET` | `/registers/stream` | SSE: current snapshot on subscribe, then each **tick** and each session write |
+| `GET` | `/points` | Canonical points (id, kind, class, live value) |
+| `GET` | `/points/{id}` | One point |
+| `PATCH` | `/points/{id}` | Body `{"value": 27.0}` or `{"value": true}`. Shifts `state.base` for analog |
+| `GET` | `/points/stream` | SSE: same cadence as `/registers/stream`; payload is the `/points` list |
 
-PATCH body is either `{"real_value": 27.0}` or `{"value": 270}` (raw).
+PATCH `/registers/…` body is either `{"real_value": 27.0}` or `{"value": 270}` (raw).
 Not both. Neither MUST 422. Unknown address MUST 404.
 
-SSE frames match `GET /registers`. Keep-alive comments every 15 s. This
-route MUST NOT be killed by the 30 s timeout.
+SSE frames for `/registers/stream` match `GET /registers`. Keep-alive comments
+every 15 s. `/registers/stream` and `/points/stream` MUST NOT be killed by the
+30 s timeout.
 
 ```mermaid
 sequenceDiagram
@@ -220,6 +228,9 @@ on 2xx, `1` otherwise.
 | `simbus ctl readyz` | `GET /readyz` |
 | `simbus ctl metrics` | `GET /metrics` |
 | `simbus ctl registers` | `GET /registers` |
+| `simbus ctl points` | `GET /points` |
+| `simbus ctl point <id>` | `GET /points/{id}` |
+| `simbus ctl set-point <id> --value` | `PATCH /points/{id}` (`--value` is a number or `true`/`false`) |
 | `simbus ctl set <addr> --real-value` / `--value` [`--input`] | `PATCH /registers/{addr}` or `/registers/input/{addr}` |
 | `simbus ctl coil <addr> --value` [`--discrete`] | `PATCH /registers/coils/{addr}` or `/registers/discrete/{addr}` |
 | `simbus ctl faults` | `GET /faults` |
@@ -236,7 +247,7 @@ on 2xx, `1` otherwise.
 | `simbus ctl active` | `GET /scenarios/active` |
 | `simbus ctl stop` | `POST /scenarios/stop` |
 
-There is no `simbus ctl` for `GET /registers/stream`. Use curl `-N` or a GUI.
+There is no `simbus ctl` for `GET /registers/stream` or `GET /points/stream`. Use curl `-N` or a GUI.
 
 ---
 

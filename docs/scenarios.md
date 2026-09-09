@@ -26,7 +26,8 @@ with the same fields). It is RAM-only, validated against the loaded map, and
 gone when the process exits. Prefer putting recipes in the device YAML so
 `simbus check` sees them.
 
-`simbus check` validates every step against this device's registers and coils.
+`simbus check` validates every step against this device's points (language 2)
+or registers and coils (language 1).
 A scenario that names `on_battery_alarm` on a UPS whose coil is `on_battery`
 MUST fail check — it MUST NOT fail silently at run time.
 
@@ -63,7 +64,7 @@ curl -X PATCH http://localhost:8000/simulation -d '{"running": true}'
 
 The runner sorts steps by `at` (simulation seconds) and sleeps
 `at / time_scale` of wall clock without blocking the tick loop. Default
-scale is 1 (1:1). Step types: `set_register`, `inject_fault`,
+scale is 1 (1:1). Step types: `set_point`, `set_register`, `inject_fault`,
 `set_coil`, `set_tick_interval` — see spec.md.
 
 ---

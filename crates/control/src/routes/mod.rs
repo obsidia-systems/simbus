@@ -1,5 +1,6 @@
 //! HTTP routes.
 
+pub mod points;
 pub mod registers;
 pub mod scenarios;
 pub mod simulation;
@@ -21,6 +22,11 @@ pub fn api_router() -> Router<AppState> {
         .route("/readyz", get(status::readyz))
         .route("/metrics", get(status::metrics))
         .route("/registers", get(registers::get_registers))
+        .route("/points", get(points::get_points))
+        .route(
+            "/points/{id}",
+            get(points::get_point).patch(points::override_point),
+        )
         .route("/registers/{address}", patch(registers::override_holding))
         .route(
             "/registers/input/{address}",

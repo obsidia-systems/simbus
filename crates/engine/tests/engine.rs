@@ -689,3 +689,62 @@ fn tick_is_noop_while_paused() {
     assert_eq!(running.holding.get(&0), Some(&420));
     assert_eq!(device.faults().len(), 1);
 }
+
+#[test]
+fn language_two_override_point_and_set_point_step() {
+    let spec = spec::load_device_from_str(
+        r"
+name: Example
+spec_version: 2
+version: '1.0'
+type: example
+points:
+  - id: analog_a
+    kind: analog
+    class: value
+    default: 50.0
+    simulation:
+      behavior: constant
+  - id: analog_a_high
+    kind: binary
+    class: input
+    default: false
+    trigger:
+      source: analog_a
+      condition: gt
+      threshold: 80.0
+bindings:
+  - protocol: modbus-tcp
+    port: 502
+    unit_id: 1
+    endianness: big
+    export:
+      analog_a:
+        space: holding
+        address: 0
+        scale: 10
+        data_type: uint16
+      analog_a_high:
+        space: coil
+        address: 0
+",
+    )
+    .unwrap();
+    let device = Device::new(spec, Some(1), 1.0);
+    let view = device
+        .override_point("analog_a", Some(81.0), None, "test")
+        .unwrap();
+    assert_eq!(view.analog, Some(81.0));
+    let snap = device.tick(1.0);
+    assert_eq!(snap.holding.get(&0), Some(&810));
+    assert_eq!(snap.coils.get(&0), Some(&true));
+
+    device.apply_step(&spec::ScenarioStep::SetPoint(spec::SetPointStep {
+        at: 0.0,
+        point: "analog_a".into(),
+        value: spec::PointLiteral::Float(50.0),
+    }));
+    let after = device.tick(1.0);
+    assert_eq!(after.holding.get(&0), Some(&500));
+    assert_eq!(after.coils.get(&0), Some(&false));
+}
